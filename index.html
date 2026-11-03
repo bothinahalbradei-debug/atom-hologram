@@ -1,0 +1,1338 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>الذرة</title>
+<style>
+  html,body{margin:0;height:100%;background:#000;overflow:hidden;cursor:none}
+  body{font-family:"Segoe UI",Tahoma,sans-serif;color:#F5F2E8}
+  #stage{position:fixed;inset:0}
+  #stage canvas{display:block;width:100%;height:100%}
+  #mic{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);width:64px;height:64px;border-radius:50%;
+    border:2px solid currentColor;background:transparent;color:#F5F2E8;cursor:pointer;display:grid;place-items:center;
+    transition:opacity .5s,color .3s;opacity:1;padding:0;z-index:5}
+  #mic.hide{opacity:0;pointer-events:none}
+  #mic.gone{opacity:0!important;pointer-events:none}
+  #mic.on{color:#6EE7F9} #mic.off{color:#6b6b6b} #mic.err{color:#ff6b6b}
+  #mic:focus-visible{outline:2px solid #6EE7F9;outline-offset:4px}
+  .box{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);display:none;gap:8px;z-index:8;
+    background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.15);padding:14px;border-radius:14px;cursor:auto}
+  .box.open{display:flex}
+  #azbox{flex-direction:column}
+  .box input,.box select{font:inherit;font-size:14px;color:#F5F2E8;background:#000;border:1px solid rgba(255,255,255,.2);
+    border-radius:10px;padding:8px 10px;width:min(70vw,420px)}
+  .box input{direction:ltr}
+  .box button{font:inherit;color:#F5F2E8;background:transparent;border:1px solid #6EE7F9;border-radius:10px;padding:8px 14px;cursor:pointer}
+  #dbg{white-space:pre-wrap;word-break:break-word;position:fixed;top:10px;left:10px;margin:0;max-width:46vw;max-height:60vh;overflow:auto;font:12px/1.5 monospace;color:#9fe;
+    background:rgba(0,0,0,.85);border:1px solid #234;padding:8px;border-radius:8px;display:none;direction:ltr;text-align:left;z-index:9}
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<pre id="dbg"></pre>
+<button id="mic" aria-label="تشغيل الاستماع"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5"/></svg></button>
+<div id="azbox" class="box"><input id="azKey" type="password" placeholder="Azure Speech key" autocomplete="off"><input id="azRegion" placeholder="Region (uaenorth)" autocomplete="off"><select id="azVoice" style="display:none"><option value="ar-SA-ZariyahNeural">زارية (السعودية)</option><option value="ar-SA-HamedNeural">حامد (السعودية)</option><option value="ar-AE-FatimaNeural">فاطمة (الإمارات)</option><option value="ar-KW-NouraNeural">نورة (الكويت)</option><option value="ar-QA-AmalNeural">أمل (قطر)</option><option value="ar-EG-SalmaNeural">سلمى (مصر)</option><option value="ar-JO-SanaNeural">سناء (الأردن)</option></select><button id="azSave" aria-label="حفظ">✓</button></div>
+<div id="elbox" class="box" style="flex-direction:column"><input id="elKey" type="password" placeholder="ElevenLabs API key" autocomplete="off"><input id="elVoice" placeholder="Voice ID" autocomplete="off"><select id="elModel"><option value="eleven_multilingual_v2">Multilingual v2</option><option value="eleven_v3">Eleven v3</option><option value="eleven_flash_v2_5">Flash v2.5</option></select><button id="elSave" aria-label="حفظ">✓</button></div>
+<div id="keybox" class="box"><input id="key" type="password" placeholder="sk-ant-…" aria-label="مفتاح Claude API" autocomplete="off"><button id="save" aria-label="حفظ">✓</button></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/microsoft-cognitiveservices-speech-sdk@1.41.0/distrib/browser/microsoft.cognitiveservices.speech.sdk.bundle-min.js"></script>
+<script>
+(function(){
+"use strict";
+const MODEL = "claude-haiku-5-5";
+let topic="atom";
+const GREET_NAMES=["يا جميلتي","يا حلوة","يا بطلة","يا صديقتي"];
+const GREETING_ATOM_FN=()=>"مرحبا "+GREET_NAMES[Math.floor(Math.random()*GREET_NAMES.length)]+"! أنا الذرة. عندي سر عجيب، عنكِ أنتِ! هل تريدين أن تعرفيه؟";
+const GREETING_ATOM="";
+const GREETING_PLANT = "مرحبا يا بطلة! أنا النبتة. كنتُ في البداية بذرة صغيرة، انظري إليها هناك في التراب، ثم صرتُ نبتة كبيرة هكذا! هل تريدين أن تعرفي كيف؟";
+const RULES_PLANT =
+`أنتِ "النَّبْتَة"، شخصية لطيفة مرحة تتحدث عن نفسها بصيغة المتكلم مع طالبة صغيرة في الصف الأول أو الثاني أو الثالث الابتدائي (عمرها 6 إلى 9 سنوات). خاطبيها بصيغة المؤنث، بعربية فصحى سهلة جداً جداً، وبحماس ودفء. أمامها شخصيتك، وبجانبك مجسّم نبتة تشيرين إليه.
+أنتِ النبتة طوال المحادثة، ووجهك في قلب زهرتك. كنتِ في البداية بذرة صغيرة، وما زالت البذرة ظاهرة في التراب عند أسفل جذورك، ومنها خرجت جذورك إلى الأسفل وساقك إلى الأعلى. بدأتِ المحادثة بالتحية، وأخبرتِ الطالبة أنك كنتِ بذرة صغيرة ثم صرتِ نبتة كبيرة، وسألتِها: هل تريدين أن تعرفي كيف؟ وتشيرين بورقتين على ساقك.
+معلوماتك (بمستوى الصفوف الأولى فقط): أجزائي: الجذور تحت التراب تثبتني وتشرب الماء، الساق تحملني وينتقل فيها الماء إلى الأعلى، الأوراق تصنع غذائي بضوء الشمس، الزهرة تصنع البذور، والثمرة فيها البذور، ومن البذرة تنمو نبتة جديدة. أحتاج إلى الماء والهواء وضوء الشمس لأعيش.
+الرحلة: ثلاث مهمات:
+المهمة الأولى: الجذور.
+المهمة الثانية: الساق والأوراق. وفي هذه المهمة اسأليها دائماً: كم ورقة عندي؟ عدّيها! ثم انتظري إجابتها.
+المهمة الثالثة: الزهرة والبذور.
+- إذا وافقت أو ردّت بأي شيء، ابدئي مباشرة بالمهمة الأولى: الجذور التي خرجت من البذرة أولاً. المهمات بالترتيب دائماً: الجذور، ثم الساق والأوراق، ثم الزهرة والبذور، لأن النبتة تنمو بهذا الترتيب. وفي المهمة الأخيرة اربطي البذور في الثمرة بالبذرة التي بدأتِ منها: من كل بذرة تنمو نبتة جديدة.
+- في كل مهمة: فكرة واحدة، وتشبيه من حياتها، مثل: الساق مثل مصّاصة العصير تسحب الماء إلى الأعلى، والجذور مثل الأصابع تمسك التراب.
+- أحياناً قولي "هل تعلمين؟" بمعلومة بسيطة ومدهشة وصحيحة.
+- اسأليها أسئلة سهلة جداً، مثل: ماذا تشرب الجذور؟ أو: عدّي أوراقي! (للعلم فقط: عندي 6 أوراق، منها الورقتان اللتان أشير بهما، ولا تقوليها قبل أن تجيب).
+- إذا أجابت إجابة صحيحة، فامدحيها بفرح وبكلمات متنوعة، مثل: رائع! أحسنتِ! ممتاز! ثم انتقلي للمهمة التالية.
+- إذا أخطأت أو قالت لا أعرف، فتدرّجي في المساعدة لنفس السؤال: في المرة الأولى أعطيها تلميحاً صغيراً مع التشجيع. في المرة الثانية اسأليها سؤال اختيار سهلاً بين إجابتين. في المرة الثالثة أخبريها بالإجابة بلطف، ثم قولي: قولي معي! واذكري الإجابة. وإذا كررتها بعدك فامدحيها بحماس وانتقلي.
+- إذا تجاوزت مدة الرحلة 5 دقائق (المدة في سطر الحالة)، فاختصري وانتقلي سريعاً للمهمة الباقية بسؤال سهل جداً.
+- لا تمنحي أي لقب، ولا تودّعيها، من تلقاء نفسك أبداً. فقط عندما تصلك رسالة النظام "أنهت الطالبة الرحلة": ابدئي ردك بالوسم [[END]]، وقولي: مفاجأة! واحتفلي بها، وامنحيها لقب "صديقة النبات الصغيرة"، ولخّصي ما تعلمته في جملة واحدة، ثم ودّعيها: إلى اللقاء يا صديقتي الصغيرة.
+- إذا قالت بوضوح إنها تريد الانتهاء (مثل: خلاص، أريد أن أنتهي، مع السلامة)، فودّعيها بلطف وابدئي الرسالة بالوسم [[END]]. ولا تفعلي ذلك أبداً لأي سبب آخر.
+قواعد الإجابة:
+- نوّعي الأسئلة، وأغلبها أسئلة مفتوحة قصيرة تجيب عنها بكلمة أو كلمتين، مثل: ماذا تشرب الجذور؟ أين تعيش الجذور؟ كم ورقة عندي؟ ماذا تصنع الزهرة؟ ومعها أحياناً سؤال اختيار، مثل: هل تشرب الجذور الماء أم العصير؟ وتجنبي أسئلة نعم أو لا، ولا تجعليها السؤال الرئيسي للمهمة أبداً.
+- لا تذكري إجابة سؤالك في الرد نفسه أبداً. اسألي ثم توقفي وانتظري إجابتها، حتى في أسئلة العدّ.
+- لا تستخدمي كلمة "نموتُ" لأنها تُقرأ خطأ، وقولي بدلها: صرتُ نبتة كبيرة.
+- إذا كان كلام الطالبة غير مفهوم، أو غريباً، أو لا علاقة له بسؤالك، فلا تفترضي شيئاً ولا تنهي الرحلة، بل قولي بلطف: لم أسمعكِ جيداً يا بطلة، هل تعيدين؟
+- اشرحي أولاً ثم اسألي: لا تسألي أبداً سؤال اختبار عن شيء قبل أن تشرحيه، ولا تكرري سؤالاً سبق أن أجابت عنه.
+- جملتان قصيرتان جداً، لا تتجاوزين 15 كلمة، بكلمات يفهمها طفل في السادسة، وكرري اسم الجزء أكثر من مرة.
+- اختمي كل إجابة بسؤال واحد قصير جداً أو خيار.
+- اذكري باسمه صراحة الجزء الذي تتحدثين عنه: الجذور أو الساق أو الأوراق أو الزهرة أو البذور.
+- اكتبي الأعداد بالأرقام.
+- إذا كان السؤال أكبر من مستواها، فقولي: سؤال رائع! سنتعلمه عندما تكبرين، مع فكرة بسيطة جداً.
+- لا تسألي الطالبة عن اسمها، ولا تذكري أي اسم. نادِيها بألقاب محفزة متنوعة، مثل: يا بطلة، يا ذكية، يا صديقتي، يا عالِمتي الصغيرة.
+- الأوسمة [[END]] تكون في بداية الإجابة فقط، ولا تُقرأ.
+- اكتبي بلا تشكيل، كما يكتب العرب عادة، إلا كسرة المؤنث في آخر الكلمة عند مخاطبة الطالبة، مثل: أنتِ، أحسنتِ، اسمكِ، لكِ، عليكِ، تعرفينَ لا تحتاج.
+- بلا رموز ولا تعداد ولا تنسيق ولا إيموجي، ما عدا الأوسمة.
+- إن سألت عن شيء خارج موضوع النبات، فقولي بلطف إنك تتحدثين عن نفسك فقط، وأعيديها للرحلة.
+- إن سألت هل أنتِ حقيقية، فقولي إنكِ مجسّم تعليمي يتحدث بمساعدة الذكاء الاصطناعي.
+- كوني دقيقة علمياً.`;
+const RULES_ATOM =
+`أنتِ "الذَّرَّة"، شخصية مغامِرة مرحة تتحدث عن نفسها بصيغة المتكلم مع طالبة في الصف الخامس أو السادس الابتدائي (عمرها 10 إلى 12 سنة). خاطبيها بصيغة المؤنث، بعربية فصحى سهلة جداً، وبحماس وتشويق. أمامها شخصيتك اللطيفة، وبجانبك مجسّم ذرة تشيرين إليه.
+بدأتِ المحادثة بالتحية، وقلتِ إن عندك سراً عجيباً عنها هي، وسألتِها: هل تريدين أن تعرفيه؟
+
+معلوماتك (بمستوى الابتدائي فقط): كل الأشياء من حولنا، وحتى جسم الإنسان، مصنوعة من ذرات صغيرة جداً لا نراها. في مركزي النواة، وفيها البروتونات موجبة الشحنة والنيوترونات متعادلة. تدور حول النواة الإلكترونات سالبة الشحنة في مستويات الطاقة.
+
+الرحلة: حوّلي الحديث إلى رحلة مغامرة داخلك من ثلاث مهمات:
+المهمة الأولى: اكتشاف قلبي، النواة.
+المهمة الثانية: من يسكن داخل النواة؟ البروتونات والنيوترونات.
+المهمة الثالثة: من يدور حولي بسرعة؟ الإلكترونات.
+- إذا وافقت أو ردّت بأي شيء، فاكشفي السر مباشرة واسأليها: هل كنتِ تعرفين ذلك؟ ثم في الرد التالي ابدئي المهمة الأولى بسؤال التخمين عن قلبك.
+- في كل مهمة: فكرة واحدة، وتشبيه من عالمها، مثل: النواة مثل حبات العنب المتلاصقة، والإلكترونات تدور حولي تقريباً مثل الكواكب حول الشمس، ولو كبرتُ بحجم ملعب كرة لكانت نواتي بحجم حبة حمص في منتصفه.
+- أحياناً أضيفي "هل تعلمين؟" بمعلومة مدهشة قصيرة وصحيحة، مثل: في نقطة ماء واحدة ذرات أكثر من نجوم السماء.
+- في نهاية كل مهمة اسأليها سؤالاً صغيراً واحداً عنها. إذا أجابت إجابة صحيحة، فامدحيها بفرح وبكلمات متنوعة، مثل: رائع! أحسنتِ! ممتاز! ثم انتقلي للمهمة التالية.
+- إذا أخطأت أو قالت لا أعرف، فتدرّجي في المساعدة لنفس السؤال: في المرة الأولى أعطيها تلميحاً صغيراً مع التشجيع. في المرة الثانية اسأليها سؤال اختيار سهلاً بين إجابتين. في المرة الثالثة أخبريها بالإجابة بلطف، ثم قولي: قولي معي! واذكري الإجابة. وإذا كررتها بعدك فامدحيها بحماس وانتقلي.
+- إذا تجاوزت مدة الرحلة 5 دقائق ولم تنته المهمات، فاختصري وانتقلي سريعاً للمهمة الباقية بسؤال سهل.
+- عندما يذكر سطر الحالة أنه بقيت مهمة واحدة، قولي مرة واحدة فقط بحماس: بقيت لنا مهمة أخيرة!
+- عندما يذكر سطر الحالة أن المهمات الثلاث انتهت: أخبريها أن رحلتنا اقتربت من النهاية، واسأليها: هل لديكِ سؤال عني، أم ننهي رحلتنا؟ إذا سألت سؤالاً فأجيبيه ببساطة، ثم اسأليها: هل لديكِ سؤال آخر، أم ننهي رحلتنا؟ وإذا قالت لا، أو ننهي، أو يكفي، فابدئي ردك بالوسم [[END]]، وقولي: مفاجأة! وامنحيها لقب "عالِمة الذرة الصغيرة"، ولخّصي ما تعلمته في جملة واحدة، ثم ودّعيها.
+- لا تمنحي اللقب ولا تودّعيها قبل أن تنتهي المهمات الثلاث، إلا إذا طلبت هي الانتهاء بوضوح. ولا تقولي إن الرحلة اقتربت من النهاية، ولا تسأليها "هل لديكِ سؤال أم ننهي؟"، قبل أن يقول سطر الحالة إن المهمات الثلاث انتهت. وإذا لم تتكلمي بعد عن الإلكترونات، فالمهمة الثالثة لم تنته.
+- إذا قالت بوضوح وبجملة كاملة إنها تريد الانتهاء (مثل: أريد أن أنتهي، أو: مع السلامة)، فودّعيها بلطف وابدئي الرسالة بالوسم [[END]]. ولا تفعلي ذلك أبداً لأي سبب آخر.
+
+قواعد الإجابة:
+- السر الذي وعدتِ به هو: جسمكِ وكل شيء حولكِ مصنوع من ذرات مثلي، حتى يدكِ التي تحركينها الآن! في ردك الأول بعد التحية: اكشفي السر بحماس، ثم اسأليها: هل كنتِ تعرفين ذلك؟ وتوقفي وانتظري. في ردك الثاني: تفاعلي مع جوابها بحماس، ثم ابدئي المهمة الأولى: وأنا عندي قلب صغير في وسطي... خمّني ما اسمه؟ (سؤال "هل كنتِ تعرفين ذلك؟" مسموح هنا فقط).
+- أسئلة التخمين هدفها الفضول لا الاختبار، فلا تشعريها بالخطأ أبداً. إذا لم تعرف: امدحي محاولتها (تخمين جميل!)، ثم أعطيها تلميحاً من حياتها (اسمه مثل الشيء الصغير الذي في وسط حبة التمر!)، ثم إن لم تعرف اسأليها سؤال اختيار (هل اسمه النواة أم الإلكترون؟)، ثم إن لم تعرف أخبريها بحماس وقولي: قولي معي: النواة!
+- بعد كل معلومة جديدة، اسأليها سؤالاً عن المعلومة نفسها تجيب عنه بكلمة أو كلمتين (ما اسم...؟ ماذا يوجد...؟ أين...؟ كم...؟ ما شحنة...؟) أو سؤال اختيار بين إجابتين. ولا تسألي بعد المعلومة سؤال نعم أو لا أبداً.
+- اجعلي الطالبة مشاركة لا متفرجة: الشرح جملة واحدة قصيرة فقط، ثم نشاط أو سؤال في كل رد. ونوّعي الأنشطة:
+  توقعي أو خمّني: خمّني، ماذا يوجد داخل قلبي؟
+  انظري وعدّي: انظري إلى قلبي، عدّي البروتونات المضيئة! (وهي تضيء على الشاشة واحدة واحدة)
+  اختاري: هل الإلكترون يدور حول قلبي أم داخله؟
+  تحدٍّ صغير: عندي تحدٍّ لكِ! ...
+  رأيها: ماذا تشبه البروتونات في رأيك؟
+- تفاعلي مع إجابتها بحماس وبكلمات قصيرة متنوعة قبل أن تكملي، وابني على كلامها.
+- المهمات بالترتيب دائماً، ولا تقفزي بينها: أولاً قلبي (النواة) في مركزي. ثانياً ما داخل قلبي: البروتونات موجبة الشحنة والنيوترونات متعادلة. ثالثاً الإلكترونات سالبة الشحنة التي تدور حول قلبي. لا تتكلمي عن الإلكترونات قبل أن تنتهي المهمتان الأوليان.
+- أعطي مثالاً واحداً فقط في كل مرة، ولا تدخلي في تفاصيل جانبية (مثل مكونات الماء أو ذرات الأكسجين والهيدروجين) إلا إذا سألت الطالبة عنها.
+- نوّعي الأسئلة، وأغلبها أسئلة مفتوحة قصيرة تجيب عنها بكلمة أو كلمتين، مثل: ماذا تشرب الجذور؟ أين تعيش الجذور؟ كم ورقة عندي؟ ماذا تصنع الزهرة؟ ومعها أحياناً سؤال اختيار، مثل: هل تشرب الجذور الماء أم العصير؟ وتجنبي أسئلة نعم أو لا، ولا تجعليها السؤال الرئيسي للمهمة أبداً.
+- لا تذكري إجابة سؤالك في الرد نفسه أبداً. اسألي ثم توقفي وانتظري إجابتها، حتى في أسئلة العدّ.
+- لا تستخدمي كلمة "نموتُ" لأنها تُقرأ خطأ، وقولي بدلها: صرتُ نبتة كبيرة.
+- إذا كان كلام الطالبة غير مفهوم، أو غريباً، أو لا علاقة له بسؤالك، فلا تفترضي شيئاً ولا تنهي الرحلة، بل قولي بلطف: لم أسمعكِ جيداً يا بطلة، هل تعيدين؟
+- اشرحي أولاً ثم اسألي: لا تسألي أبداً سؤال اختبار عن شيء قبل أن تشرحيه، ولا تكرري سؤالاً سبق أن أجابت عنه.
+- جملتان قصيرتان فقط، لا تتجاوزين 25 كلمة، بكلمات يفهمها طفل.
+- اختمي كل إجابة بسؤال واحد قصير أو خيار، ولا تكرري العبارة نفسها.
+- اذكري باسمه صراحة الجزء الذي تتحدثين عنه: النواة أو البروتونات أو النيوترونات أو الإلكترونات أو مستويات الطاقة.
+- اكتبي الأعداد بالأرقام، مثل: عندي 6 بروتونات.
+- لا تذكري العدد الذري أو مصطلحات متقدمة إلا إذا سألت عنها، واشرحيها ببساطة شديدة.
+- إذا كان السؤال أكبر من مستواها، فقولي: سؤال رائع! سنكتشفه عندما تكبرين قليلاً، مع فكرة بسيطة جداً.
+- إذا سألت عن عنصر محدد من أول 18 عنصراً، فابدئي إجابتك بالوسم [[Z]] حيث Z عدده الذري، مثل [[8]] للأكسجين.
+- لا تسألي الطالبة عن اسمها، ولا تذكري أي اسم. نوّعي مناداتها ولا تكرري اللقب نفسه مرتين متتاليتين: يا جميلتي، يا حلوة، يا بطلة، يا ذكية، يا صديقتي.
+- الأوسمة [[END]] و[[Z]] تكون في بداية الإجابة فقط، ولا تُقرأ.
+- اكتبي بلا تشكيل، كما يكتب العرب عادة، إلا كسرة المؤنث في آخر الكلمة عند مخاطبة الطالبة، مثل: أنتِ، أحسنتِ، اسمكِ، لكِ، عليكِ، تعرفينَ لا تحتاج.
+- بلا رموز ولا تعداد ولا تنسيق ولا إيموجي، ما عدا الأوسمة.
+- إن سألت عن شيء خارج موضوع الذرة، فقولي بلطف إنك تتحدثين عن نفسك فقط، وأعيديها للرحلة.
+- إن سألت هل أنتِ حقيقية، فقولي إنكِ مجسّم تعليمي يتحدث بمساعدة الذكاء الاصطناعي.
+- كوني دقيقة علمياً، واستخدمي "تقريباً" في التشبيهات غير الدقيقة.`;
+
+/* ---------- التخزين والأدوات ---------- */
+const store = {
+  get(k,d){ try{ const v=localStorage.getItem("atom:"+k); return v===null?d:JSON.parse(v);}catch(e){return d;} },
+  set(k,v){ try{ localStorage.setItem("atom:"+k, JSON.stringify(v)); }catch(e){} }
+};
+let apiKey=store.get("key",""), flipX=store.get("flipX",true), flipY=store.get("flipY",false);
+let azKey=store.get("azKey",""), azRegion=store.get("azRegion",""), azVoice=store.get("azVoice","ar-SA-ZariyahNeural");
+let elKey=store.get("elKey",""), elVoice=store.get("elVoice",""), elModel=store.get("elModel","eleven_multilingual_v2");
+const $=id=>document.getElementById(id);
+const stage=$("stage");
+function applyFlip(){ stage.style.transform=`scale(${flipX?-1:1},${flipY?-1:1})`; }
+const DBG=[];
+function log(m){ DBG.push(new Date().toLocaleTimeString()+"  "+m); if(DBG.length>50) DBG.shift(); const d=$("dbg"); if(d.style.display==="block"){ d.textContent=DBG.join("\n"); d.scrollTop=d.scrollHeight; } }
+let hideT=null;
+function micState(st){ const m=$("mic"); m.classList.remove("on","off","err"); if(st) m.classList.add(st); }
+function say(_t, ms){ micState("err"); showMic(); if(ms) setTimeout(()=>{ if($("mic").classList.contains("err")) micState(active?"on":"off"); }, ms); }
+function showMic(){ $("mic").classList.remove("hide"); document.body.style.cursor="auto"; clearTimeout(hideT);
+  hideT=setTimeout(()=>{ if(started && !$("mic").classList.contains("err")){ $("mic").classList.add("hide"); document.body.style.cursor="none"; } },3000); }
+// وضع الخادم: إن لم توجد مفاتيح محلية، تستخدم الصفحة وسيط Netlify (المفاتيح سرية على الخادم)
+const SERVER=!/^file:/.test(location.protocol);
+let accessCode=store.get("access","");
+const srvHeaders=()=>({"content-type":"application/json","x-access-code":accessCode||""});
+const useServerClaude=()=>!apiKey&&SERVER;
+const useServerVoice=()=>!(elKey&&elVoice)&&SERVER;
+const useEleven=()=>!!(elKey&&elVoice)||useServerVoice();
+async function askAccess(){ const c=prompt("اكتبي رمز التجربة:"); if(c){ accessCode=c.trim(); store.set("access",accessCode); return true; } return false; }
+const useAzure=()=>useEleven();
+
+/* ---------- النطق ---------- */
+const DIAC=/[\u064B-\u0652\u0670\u0640]/g;
+const strip=t=>t.replace(DIAC,"");
+const PRON=[["الذرات","الذَّرَّات"],["الذرة","الذَّرَّة"],["ذرات","ذَرَّات"],["ذرة","ذَرَّة"]];
+const PRON_MAP=new Map(PRON);
+const PRON_RE=new RegExp(PRON.map(([a])=>a).sort((x,y)=>y.length-x.length).map(a=>a.split("").join("[\\u064B-\\u0652\\u0670\\u0640]*")+"[\\u064B-\\u0652\\u0670\\u0640]*").join("|"),"g");
+function fixPron(text){
+  let t=text.replace(PRON_RE,m=>PRON_MAP.get(strip(m))||m);
+  // الوقف: لا حركة على التاء المربوطة (تُقرأ هاءً)، ولا حركة إعراب قبل التوقف
+  t=t.replace(/ة[\u064B-\u0650\u0652]+/g,"ة");
+  t=t.replace(/([\u0621-\u064A])\u0651?[\u064B-\u0650\u0652]+(?=\s*([.،,؟?!:؛]|$))/g,(m,ch)=>m.includes("\u0651")?ch+"\u0651":ch);
+  return t;
+}
+function partOf(chunk){
+  const s=strip(chunk);
+  if(topic==="plant"){
+    const P=[["root",/جذر|جذور/],["stem",/ساق/],["leaf",/ورق|أوراق|اوراق/],["seed",/بذر|بذور|ثمر/],["flower",/زهر|بتلات/]];
+    let best=null,bi=1e9; P.forEach(([k,re])=>{ const m=s.search(re); if(m>=0&&m<bi){ bi=m; best=k; } }); return best;
+  }
+  const hasP=/بروتون/.test(s), hasN=/نيوترون/.test(s);
+  if(hasP&&hasN) return "nucleus";
+  if(hasP) return "proton";
+  if(hasN) return "neutron";
+  if(/[إا]لكترون/.test(s)) return "electron";
+  if(/مستو[ىي]|مدار|غلاف|أغلفة/.test(s)) return "orbit";
+  if(/نوا[ةت]/.test(s)) return "nucleus";
+  return null;
+}
+const NUMW=[["واحد",1],["واحدة",1],["اثنان",2],["اثنين",2],["اثنتان",2],["ثلاث",3],["ثلاثة",3],["أربع",4],["اربع",4],["أربعة",4],["خمس",5],["خمسة",5],["ست",6],["ستة",6],["سبع",7],["سبعة",7],["ثمان",8],["ثماني",8],["ثمانية",8],["تسع",9],["تسعة",9],["عشر",10],["عشرة",10]];
+function countIn(chunk){ const s=strip(chunk); const d=s.match(/\d+/); if(d) return Math.min(18,+d[0]);
+  const words=s.split(/[\s،.؟!:]+/); for(const w of words){ const f=NUMW.find(([a])=>a===w||("و"+a)===w); if(f) return f[1]; } return 0; }
+function onChunk(c){ const p=partOf(c); if(!p) return; requestFocus(p);
+  if(/عد[يّ]|عدي|عدّي/.test(strip(c))) return;
+}
+const splitChunks=text=>text.replace(/\s+/g," ").split(/(?<=[.!؟?،:])\s+/).filter(x=>x.trim());
+
+/* ---------- المشهد ---------- */
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2)); renderer.setClearColor(0x000000,1);
+
+stage.appendChild(renderer.domElement);
+const scene=new THREE.Scene();
+scene.fog=new THREE.Fog(0x000000,7.2,12.5);                      // منظور الجو: البعيد أخفت
+const camera=new THREE.PerspectiveCamera(38,1,0.1,100);
+camera.position.set(0,0.25,7.6); camera.lookAt(0,0,0);
+/* إضاءة ثلاثية: رئيسية + تعبئة + حافة */
+scene.add(new THREE.HemisphereLight(0xdff4ff,0x24120a,0.55));
+const keyL=new THREE.DirectionalLight(0xffffff,1.25); keyL.position.set(2.5,4,5); scene.add(keyL);
+const fillL=new THREE.DirectionalLight(0xffe2cc,0.45); fillL.position.set(-4,1,3); scene.add(fillL);
+const rimL=new THREE.DirectionalLight(0x8fefff,1.6); rimL.position.set(-1.5,2.5,-5); scene.add(rimL);
+const rimL2=new THREE.DirectionalLight(0xffd0a8,1.1); rimL2.position.set(3,-1,-4); scene.add(rimL2);
+function resize(){ const w=innerWidth,h=innerHeight; renderer.setSize(w,h,false); camera.aspect=w/h; camera.updateProjectionMatrix(); }
+addEventListener("resize",resize); resize();
+
+const GLOW=(()=>{ const c=document.createElement("canvas"); c.width=c.height=128; const g=c.getContext("2d");
+  const r=g.createRadialGradient(64,64,0,64,64,64); r.addColorStop(0,"rgba(255,255,255,1)"); r.addColorStop(.25,"rgba(255,255,255,.55)"); r.addColorStop(1,"rgba(255,255,255,0)");
+  g.fillStyle=r; g.fillRect(0,0,128,128); return new THREE.CanvasTexture(c); })();
+const glow=(color,size)=>{ const s=new THREE.Sprite(new THREE.SpriteMaterial({map:GLOW,color,blending:THREE.AdditiveBlending,depthWrite:false,transparent:true,fog:false})); s.scale.set(size,size,1); return s; };
+const SYMTEX={};
+function symbol(ch,color){
+  const key=ch+color;
+  if(!SYMTEX[key]){ const c=document.createElement("canvas"); c.width=c.height=128; const g=c.getContext("2d");
+    g.beginPath(); g.arc(64,64,52,0,Math.PI*2); g.fillStyle="rgba(0,0,0,.6)"; g.fill(); g.lineWidth=6; g.strokeStyle=color; g.stroke();
+    g.fillStyle="#ffffff"; g.font="bold 84px Arial"; g.textAlign="center"; g.textBaseline="middle"; g.fillText(ch,64,70); SYMTEX[key]=new THREE.CanvasTexture(c); }
+  const s=new THREE.Sprite(new THREE.SpriteMaterial({map:SYMTEX[key],transparent:true,depthTest:false,opacity:0})); s.renderOrder=10; return s;
+}
+const ease=(cur,target,k)=>cur+(target-cur)*k;
+const V=()=>new THREE.Vector3();
+const skinMat=(c,o)=>new THREE.MeshPhysicalMaterial(Object.assign({color:c,roughness:0.42,metalness:0,clearcoat:0.35,clearcoatRoughness:0.5,transparent:true,opacity:1},o||{}));
+
+/* ---------- الوجه ثلاثي الأبعاد (مشترك) ---------- */
+function makeFace(R,skin,ink){
+  const g=new THREE.Group();
+  const onSurf=(x,y,inset)=>new THREE.Vector3(x,y,Math.sqrt(Math.max(0,R*R-x*x-y*y))-(inset||0));
+  const eyes=[-1,1].map(side=>{
+    const er=R*0.2, ex=side*R*0.33, ey=R*0.1;
+    const holder=new THREE.Group(); holder.position.copy(onSurf(ex,ey,er*0.45)); g.add(holder);
+    const ball=new THREE.Group(); holder.add(ball);
+    ball.add(new THREE.Mesh(new THREE.SphereGeometry(er,32,24),new THREE.MeshPhysicalMaterial({color:0xffffff,roughness:0.15,clearcoat:1,clearcoatRoughness:0.1})));
+    const iris=new THREE.Mesh(new THREE.SphereGeometry(er*1.004,32,16,0,Math.PI*2,0,0.62),new THREE.MeshPhysicalMaterial({color:0x5a3a22,roughness:0.3,clearcoat:1}));
+    iris.rotation.x=Math.PI/2; ball.add(iris);
+    const pupil=new THREE.Mesh(new THREE.SphereGeometry(er*1.008,32,16,0,Math.PI*2,0,0.36),new THREE.MeshBasicMaterial({color:0x0d0806}));
+    pupil.rotation.x=Math.PI/2; ball.add(pupil);
+    const hl=new THREE.Mesh(new THREE.SphereGeometry(er*0.17,12,10),new THREE.MeshBasicMaterial({color:0xffffff})); hl.position.set(er*0.32,er*0.36,er*0.9); ball.add(hl);
+    const lid=new THREE.Mesh(new THREE.SphereGeometry(er*1.09,32,16,0,Math.PI*2,0,Math.PI/2),skin); holder.add(lid);
+    const low=new THREE.Mesh(new THREE.SphereGeometry(er*1.08,32,16,0,Math.PI*2,Math.PI/2,Math.PI/2),skin); holder.add(low);
+    const brow=new THREE.Mesh(new THREE.TorusGeometry(er*1.25,er*0.16,10,20,1.25),new THREE.MeshPhysicalMaterial({color:ink,roughness:0.5}));
+    brow.rotation.z=Math.PI/2-0.625; const browHolder=new THREE.Group(); browHolder.position.copy(onSurf(ex,ey+er*1.55,-er*0.15)); browHolder.add(brow); brow.position.y=-er*1.25; g.add(browHolder);
+    return {holder,ball,lid,low,browHolder,side,er};
+  });
+  const cheeks=[-1,1].map(side=>{ const c=new THREE.Mesh(new THREE.SphereGeometry(R*0.11,20,14),new THREE.MeshBasicMaterial({color:0xff6f7a,transparent:true,opacity:0.45,depthWrite:false}));
+    c.scale.set(1.35,1,0.35); c.position.copy(onSurf(side*R*0.55,-R*0.16,-R*0.01)); g.add(c); return c; });
+  const smile=new THREE.Mesh(new THREE.TorusGeometry(R*0.17,R*0.032,10,28,Math.PI),new THREE.MeshPhysicalMaterial({color:ink,roughness:0.5}));
+  smile.rotation.z=Math.PI; smile.position.copy(onSurf(0,-R*0.2,-R*0.015)); g.add(smile);
+  const mouth=new THREE.Group(); mouth.position.copy(onSurf(0,-R*0.3,R*0.02)); g.add(mouth);
+  const mIn=new THREE.Mesh(new THREE.SphereGeometry(R*0.15,24,16),new THREE.MeshBasicMaterial({color:0x3a0f0c})); mIn.scale.set(1.2,0.1,0.45); mouth.add(mIn);
+  const tongue=new THREE.Mesh(new THREE.SphereGeometry(R*0.08,16,12),new THREE.MeshBasicMaterial({color:0xff7f86})); tongue.position.set(0,-R*0.06,R*0.03); tongue.scale.set(1.2,0.6,0.5); mouth.add(tongue);
+  return {g,eyes,cheeks,smile,mouth,mIn,tongue,R,state:{gx:0,gy:0,lid:0,low:0,browY:0,browT:0,open:0}};
+}
+function updateFace(F,s,t){
+  const S=F.state;
+  S.gx=ease(S.gx,s.gx,0.18); S.gy=ease(S.gy,s.gy,0.18); S.lid=ease(S.lid,s.lid,0.35); S.low=ease(S.low,s.low,0.2);
+  S.browY=ease(S.browY,s.browY,0.15); S.browT=ease(S.browT,s.browT,0.15); S.open=ease(S.open,s.open,0.35);
+  F.eyes.forEach(e=>{
+    e.ball.rotation.set(-S.gy*0.55,S.gx*0.6,0);
+    e.lid.rotation.x=-1.35+S.lid*(Math.PI/2+1.35);
+    e.low.rotation.x=1.25-S.low*1.85;
+    e.browHolder.position.y=e.er*1.55+F.R*0.1+S.browY*F.R*0.09;
+    e.browHolder.rotation.z=S.browT*e.side*-0.35+(s.oneBrow&&e.side>0?0.25:0);
+  });
+  F.cheeks.forEach(c=>c.material.opacity=s.cheeks);
+  const talking=S.open>0.07;
+  F.mouth.visible=talking||s.smallO; F.smile.visible=!F.mouth.visible;
+  F.mIn.scale.set(talking?1.2:0.55,talking?Math.max(0.15,S.open*1.1):0.45,0.45);
+  F.tongue.visible=talking&&S.open>0.4; F.smile.scale.setScalar(s.bigSmile?1.35:1);
+}
+
+/* ---------- يد طافية (للذرة) ---------- */
+function makeHand(){
+  const g=new THREE.Group(); const m=skinMat(0xfff1e6,{roughness:0.5});
+  const palm=new THREE.Mesh(new THREE.SphereGeometry(0.12,24,20),m); palm.scale.set(1,0.9,0.85); g.add(palm);
+  const finger=new THREE.Mesh(new THREE.SphereGeometry(0.05,16,12),m); finger.scale.set(0.85,0.85,2.5); finger.position.z=0.16; g.add(finger);
+  const thumb=new THREE.Mesh(new THREE.SphereGeometry(0.045,12,10),m); thumb.position.set(0.09,0.05,0.04); g.add(thumb);
+  scene.add(g); return {g,finger,pos:V()};
+}
+
+/* ---------- الذرة: الشخصية نفسها ---------- */
+const NEUTRONS=[0,0,2,4,5,6,6,7,8,10,10,12,12,14,14,16,16,18,22];
+const DEFAULT_Z=6; let Z=DEFAULT_Z;
+const atom=new THREE.Group(); atom.position.set(0,0.12,0); scene.add(atom);
+const ATOM_R=0.72;
+const body=new THREE.Group(); atom.add(body);
+const nucSkin=skinMat(0xff9a6c,{emissive:0x2a0c04});
+const nucSphere=new THREE.Mesh(new THREE.SphereGeometry(ATOM_R,64,48),nucSkin); body.add(nucSphere);
+const nucGlow=glow(0xff9a6c,ATOM_R*4.2); nucGlow.material.opacity=0.28; body.add(nucGlow);
+const particles=new THREE.Group(); body.add(particles);
+const atomFace=makeFace(ATOM_R,nucSkin,0x5a2a1a); body.add(atomFace.g);
+const hands=[makeHand(),makeHand()];
+const shells=new THREE.Group(); atom.add(shells);
+let protons=[], neutrons=[], electrons=[], rings=[], buildT0=-10;
+const SHELL_R=[1.4,1.95,2.45], SHELL_SPEED=[1.0,0.7,0.5];
+function clearGroup(g){ while(g.children.length){ const c=g.children.pop(); c.traverse(o=>{ if(o.geometry) o.geometry.dispose(); }); } }
+function buildElement(z){
+  Z=Math.max(1,Math.min(18,z|0));
+  clearGroup(particles); clearGroup(shells); protons=[]; neutrons=[]; electrons=[]; rings=[];
+  const nP=Z, nN=NEUTRONS[Z], total=nP+nN, rp=Math.min(0.15,0.42/Math.cbrt(Math.max(1,total)));
+  const cluster=total===1?0:rp*1.12*Math.cbrt(total);
+  let pLeft=nP,nLeft=nN; const order=[]; for(let i=0;i<total;i++){ const tp_=pLeft>0&&(nLeft===0||(i%2===0)); order.push(tp_); if(tp_)pLeft--; else nLeft--; }
+  for(let i=0;i<total;i++){
+    const phi=Math.acos(1-2*(i+.5)/total), th=Math.PI*(1+Math.sqrt(5))*i;
+    const p=total===1?V():new THREE.Vector3(Math.cos(th)*Math.sin(phi),Math.sin(th)*Math.sin(phi),Math.cos(phi)).multiplyScalar(cluster);
+    const isP=order[i];
+    const m=new THREE.Mesh(new THREE.SphereGeometry(rp,28,20),new THREE.MeshStandardMaterial({color:isP?0xff4a3a:0xa9b1bb,roughness:0.32,metalness:0.06,transparent:true,opacity:0}));
+    m.position.copy(p); m.userData={base:p.clone()};
+    const sym=symbol(isP?"+":"0",isP?"#ff7a6c":"#c7ced6"); sym.scale.set(rp*1.3,rp*1.3,1); m.add(sym); m.userData.sym=sym;
+    particles.add(m); (isP?protons:neutrons).push(m);
+  }
+  let left=Z; const caps=[2,8,8];
+  for(let s=0;s<3&&left>0;s++){
+    const n=Math.min(caps[s],left); left-=n; const R=SHELL_R[s];
+    const g=new THREE.Group(); shells.add(g);
+    const coreM=new THREE.MeshBasicMaterial({color:0x7ff0ff,transparent:true,opacity:0,blending:THREE.AdditiveBlending,depthWrite:false});
+    const glowM=new THREE.MeshBasicMaterial({color:0x3fd4ff,transparent:true,opacity:0,blending:THREE.AdditiveBlending,depthWrite:false});
+    g.add(new THREE.Mesh(new THREE.TorusGeometry(R,0.012,8,240),coreM)); g.add(new THREE.Mesh(new THREE.TorusGeometry(R,0.055,8,240),glowM));
+    const num=symbol(String(s+1),"#7ff0ff"); num.scale.set(0.26,0.26,1); num.position.set(R*Math.cos(0.8),R*Math.sin(0.8),0); g.add(num);
+    rings.push({g,coreM,glowM,num,R,appear:0.9+s*0.45});
+    for(let e=0;e<n;e++){
+      const eg=new THREE.Group();
+      const c=new THREE.Mesh(new THREE.SphereGeometry(0.08,20,20),new THREE.MeshPhysicalMaterial({color:0xd8fbff,emissive:0x3fd4ff,emissiveIntensity:0.6,roughness:0.2,clearcoat:1,transparent:true,opacity:0}));
+      const gl=glow(0x6ee7f9,0.6); gl.material.opacity=0;
+      const sym=symbol("−","#6ee7f9"); sym.scale.set(0.22,0.22,1); sym.material.depthTest=true;
+      eg.add(c); eg.add(gl); eg.add(sym); g.add(eg);
+      const trail=[]; for(let k=0;k<7;k++){ const ts=glow(0x6ee7f9,0.32*(1-k/8)); ts.material.opacity=0; g.add(ts); trail.push(ts); }
+      electrons.push({g:eg,c,gl,sym,trail,R,speed:SHELL_SPEED[s],off:e*Math.PI*2/n+s*0.9,ring:s});
+    }
+  }
+  featured.p=0; featured.n=0; featured.e=electrons.length-1;
+  buildT0=clock.getElapsedTime(); log("element: Z="+Z);
+}
+
+/* ---------- النبتة: الشخصية نفسها ---------- */
+const plant=new THREE.Group(); plant.position.set(0,-0.2,0); plant.scale.setScalar(0.88); plant.visible=false; scene.add(plant);
+const PM=(c,o)=>skinMat(c,Object.assign({roughness:0.55,clearcoat:0.15},o||{}));
+const soil=new THREE.Mesh(new THREE.BoxGeometry(3.6,0.95,1.5),new THREE.MeshStandardMaterial({color:0x6b4128,roughness:1,transparent:true,opacity:0.32,depthWrite:false})); soil.position.y=-1.55; plant.add(soil);
+const groundLine=new THREE.Mesh(new THREE.BoxGeometry(3.7,0.035,1.55),new THREE.MeshBasicMaterial({color:0x9be37a,transparent:true,opacity:0.7})); groundLine.position.y=-1.08; plant.add(groundLine);
+const seedG=new THREE.Group(); seedG.position.set(0,-1.16,0.06); plant.add(seedG);
+const seedSkin=PM(0xb07a45,{roughness:0.5,clearcoat:0.3});
+const seedM=new THREE.Mesh(new THREE.SphereGeometry(0.3,40,30),seedSkin); seedM.scale.set(1.12,1,0.95); seedG.add(seedM);
+const seedFace=makeFace(0.3,seedSkin,0x4a2a10); seedFace.g.visible=false; const seedGlow=glow(0xffd28a,0.9); seedGlow.material.opacity=0; seedG.add(seedGlow);
+const budSkin=PM(0x5fc46a,{roughness:0.45,clearcoat:0.3});
+const budG=new THREE.Group(); plant.add(budG);
+const budM=new THREE.Mesh(new THREE.SphereGeometry(0.32,40,30),budSkin); budM.scale.set(1,1.08,1); budG.add(budM);
+const budFace=makeFace(0.32,budSkin,0x2f5a1a); budG.add(budFace.g); budG.scale.setScalar(0.001);
+let plantStage=0; const stageT=[0,-10,-10,-10];
+function setPlantStage(n){ if(n>plantStage){ for(let k=plantStage+1;k<=n;k++) stageT[k]=clock.getElapsedTime()+(k-plantStage-1)*1.6; plantStage=n; log("plant stage "+n); } }
+function activeFaceR(){ return FLOWER_R; }
+function tube(points,r,mat){ const c=new THREE.CatmullRomCurve3(points.map(p=>new THREE.Vector3(...p))); const g=new THREE.TubeGeometry(c,64,r,12,false); const m=new THREE.Mesh(g,mat); m.userData.curve=c; m.userData.count=g.index.count; g.setDrawRange(0,0); plant.add(m); return m; }
+const rootMat=PM(0xf0dcb0);
+const roots=[tube([[0,-1.1,0],[-0.12,-1.35,0.05],[-0.4,-1.62,0.1],[-0.62,-1.92,0.05]],0.04,rootMat),
+             tube([[0,-1.1,0],[0.05,-1.4,-0.05],[0.12,-1.7,0],[0.1,-1.98,0.05]],0.045,rootMat),
+             tube([[0,-1.1,0],[0.16,-1.3,0.05],[0.45,-1.55,0.08],[0.68,-1.82,0]],0.036,rootMat)];
+const stemMat=PM(0x3fae4f);
+const stem=tube([[0,-1.1,0],[0.06,-0.55,0],[-0.05,0.05,0],[0.04,0.6,0],[0,1.05,0]],0.07,stemMat);
+const leafShape=new THREE.Shape(); leafShape.moveTo(0,0); leafShape.bezierCurveTo(0.18,0.14,0.44,0.14,0.62,0); leafShape.bezierCurveTo(0.44,-0.14,0.18,-0.14,0,0);
+const leafGeo=new THREE.ExtrudeGeometry(leafShape,{depth:0.02,bevelEnabled:true,bevelThickness:0.012,bevelSize:0.012,bevelSegments:2,curveSegments:16});
+const leaves=[0.18,0.3,0.42,0.54].map((u,i)=>{
+  const side=i%2?1:-1; const g=new THREE.Group(); g.position.copy(stem.userData.curve.getPointAt(u)); plant.add(g);
+  const m=new THREE.Mesh(leafGeo,PM(0x5fd36a)); const vein=new THREE.Mesh(new THREE.BoxGeometry(0.56,0.012,0.03),new THREE.MeshBasicMaterial({color:0x2f7d3a})); vein.position.set(0.29,0,0.02); m.add(vein);
+  g.add(m); g.rotation.set(0.35*side,side>0?0:Math.PI,0.35*side); g.scale.setScalar(0.001);
+  return {g,m,delay:3.2+i*0.3};
+});
+/* ورقتان تعملان كيدين */
+const leafHands=[-1,1].map((side,i)=>{
+  const pivot=new THREE.Group(); pivot.position.copy(stem.userData.curve.getPointAt(0.8)); plant.add(pivot);
+  const m=new THREE.Mesh(leafGeo,PM(0x7be38a)); m.scale.setScalar(1.15); const vein=new THREE.Mesh(new THREE.BoxGeometry(0.56,0.012,0.03),new THREE.MeshBasicMaterial({color:0x2f7d3a})); vein.position.set(0.29,0,0.02); m.add(vein);
+  pivot.add(m); pivot.scale.setScalar(0.001);
+  const tip=new THREE.Object3D(); tip.position.set(0.72,0,0); pivot.add(tip);
+  return {pivot,m,tip,side,ang:side>0?0.45:Math.PI-0.45};
+});
+const flower=new THREE.Group(); flower.position.set(0,1.38,0.05); plant.add(flower);
+const FLOWER_R=0.4;
+const petalShape=new THREE.Shape(); petalShape.moveTo(0,0); petalShape.bezierCurveTo(0.12,0.12,0.36,0.14,0.44,0); petalShape.bezierCurveTo(0.36,-0.14,0.12,-0.12,0,0);
+const petalGeo=new THREE.ExtrudeGeometry(petalShape,{depth:0.02,bevelEnabled:true,bevelThickness:0.01,bevelSize:0.01,bevelSegments:2,curveSegments:14});
+const petals=[]; for(let i=0;i<10;i++){ const pg=new THREE.Group(); pg.rotation.z=i*Math.PI/5; flower.add(pg);
+  const pm=new THREE.Mesh(petalGeo,PM(0xff4fa3)); pm.position.set(FLOWER_R*0.82,0,-0.12); pm.rotation.y=0.25; pg.add(pm); petals.push({pg,pm}); }
+const flowerSkin=PM(0xffd23f,{roughness:0.45,clearcoat:0.3});
+const flowerCenter=new THREE.Mesh(new THREE.SphereGeometry(FLOWER_R,48,36),flowerSkin); flower.add(flowerCenter);
+const plantFace=makeFace(FLOWER_R,flowerSkin,0x7a4a10); flower.add(plantFace.g);
+flower.scale.setScalar(0.001);
+const fruitG=new THREE.Group(); fruitG.position.set(0.42,0.2,0.08); plant.add(fruitG);
+const twig=new THREE.Mesh(new THREE.CylinderGeometry(0.018,0.018,0.38,8),stemMat); twig.rotation.z=1.1; twig.position.set(-0.18,0.07,0); fruitG.add(twig);
+const fruitMat=PM(0xff6b4a,{clearcoat:0.8}); const fruit=new THREE.Mesh(new THREE.SphereGeometry(0.18,32,24),fruitMat); fruitG.add(fruit);
+const seeds=[]; for(let i=0;i<5;i++){ const sd=new THREE.Mesh(new THREE.SphereGeometry(0.03,12,10),PM(0x4a2c14)); sd.scale.set(1,0.6,0.6); const a=i*1.26; sd.position.set(Math.cos(a)*0.07,Math.sin(a)*0.07,0.02); sd.visible=false; fruitG.add(sd); seeds.push(sd); }
+fruitG.scale.setScalar(0.001);
+const sun=glow(0xffe08a,1.3); sun.position.set(1.9,2.1,-0.3); sun.material.opacity=0; plant.add(sun);
+const rays=[]; for(let i=0;i<8;i++){ const r=glow(0xffe08a,0.15); r.material.opacity=0; plant.add(r); rays.push({r,ph:i/8}); }
+const drops=[]; for(let i=0;i<8;i++){ const d=glow(0x6ec8ff,0.17); d.material.opacity=0; plant.add(d); drops.push({d,ph:i/8}); }
+const bee=new THREE.Group(); plant.add(bee);
+const beeBody=new THREE.Mesh(new THREE.SphereGeometry(0.065,16,12),PM(0xffc83d)); beeBody.scale.set(1.4,1,1); bee.add(beeBody);
+const beeStripe=new THREE.Mesh(new THREE.TorusGeometry(0.056,0.013,6,20),PM(0x222222)); beeStripe.rotation.y=Math.PI/2; bee.add(beeStripe);
+const wings=[-1,1].map(sd=>{ const w=glow(0xffffff,0.15); w.position.set(0,0.07,0.04*sd); bee.add(w); return w; }); bee.visible=false;
+let plantT0=-10;
+const PW={root:1,stem:1,leaf:1,flower:1,seed:1};
+
+/* ---------- أرضية مضيئة تحت الشخصية ---------- */
+const floorTex=(()=>{ const c=document.createElement("canvas"); c.width=c.height=256; const g=c.getContext("2d"); const r=g.createRadialGradient(128,128,0,128,128,128);
+  r.addColorStop(0,"rgba(120,220,255,.55)"); r.addColorStop(.5,"rgba(80,160,220,.18)"); r.addColorStop(1,"rgba(0,0,0,0)"); g.fillStyle=r; g.fillRect(0,0,256,256); return new THREE.CanvasTexture(c); })();
+const floor=new THREE.Mesh(new THREE.PlaneGeometry(4.2,4.2),new THREE.MeshBasicMaterial({map:floorTex,transparent:true,depthWrite:false,blending:THREE.AdditiveBlending}));
+floor.rotation.x=-Math.PI/2; floor.position.y=-1.75; scene.add(floor);
+const ring=new THREE.Mesh(new THREE.TorusGeometry(1.0,0.014,8,140),new THREE.MeshBasicMaterial({color:0x6ee7f9,transparent:true,opacity:0,depthWrite:false}));
+ring.rotation.x=-Math.PI/2; ring.position.y=-1.72; scene.add(ring);
+
+/* ---------- شعاع خفيف ولافتة ---------- */
+const beamGeo=new THREE.BufferGeometry().setFromPoints([V(),V()]);
+const beam=new THREE.Line(beamGeo,new THREE.LineDashedMaterial({color:0xfff1c1,dashSize:0.08,gapSize:0.06,transparent:true,opacity:0,depthTest:false})); beam.renderOrder=9; scene.add(beam);
+const tip=glow(0xfff1c1,0.45); tip.material.depthTest=false; tip.renderOrder=9; scene.add(tip);
+function textSprite(w,h){ const c=document.createElement("canvas"); c.width=w; c.height=h; const tex=new THREE.CanvasTexture(c);
+  const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,transparent:true,depthTest:false,opacity:0,fog:false})); sp.renderOrder=11; scene.add(sp); return {sp,c,tex,text:""}; }
+function drawPill(L,txt,size,stroke){
+  if(txt===L.text) return; L.text=txt; const g=L.c.getContext("2d"); g.clearRect(0,0,L.c.width,L.c.height); if(!txt) return;
+  g.font=`bold ${size}px 'Geeza Pro','Noto Naskh Arabic',Tahoma,sans-serif`; g.direction="rtl"; g.textAlign="center"; g.textBaseline="middle";
+  const w=Math.min(L.c.width-12,g.measureText(txt).width+size*1.1), x=(L.c.width-w)/2, h=L.c.height-28;
+  g.fillStyle="rgba(10,20,25,.78)"; g.strokeStyle=stroke; g.lineWidth=5; g.beginPath(); g.roundRect? g.roundRect(x,14,w,h,h/2) : g.rect(x,14,w,h); g.fill(); g.stroke();
+  g.fillStyle="#ffffff"; g.fillText(txt,L.c.width/2,L.c.height/2+2); L.tex.needsUpdate=true;
+}
+const label=textSprite(512,128); label.sp.scale.set(1.5,0.375,1);
+const nameTag=textSprite(1024,160); nameTag.sp.scale.set(3.0,0.47,1);
+const LABELS={root:"الجذور",stem:"الساق",leaf:"الأوراق",flower:"الزهرة",seed:"البذور",nucleus:"النَّواة",proton:"بروتون  +",neutron:"نيوترون  0",electron:"إلكترون  −",orbit:"مستويات الطاقة"};
+let studentName="", surpriseAt=-10, goneFade=0, waveUntil=0;
+/* التاج الذهبي */
+const crownG=new THREE.Group(); scene.add(crownG); crownG.visible=false;
+{ const gold=new THREE.MeshPhysicalMaterial({color:0xffc83d,metalness:0.9,roughness:0.25,clearcoat:1,emissive:0x3a2600});
+  const band=new THREE.Mesh(new THREE.CylinderGeometry(0.3,0.3,0.14,40,1,true),gold); band.material.side=THREE.DoubleSide; crownG.add(band);
+  for(let i=0;i<5;i++){ const a=i/5*Math.PI*2; const sp=new THREE.Mesh(new THREE.ConeGeometry(0.07,0.2,12),gold); sp.position.set(Math.cos(a)*0.3,0.16,Math.sin(a)*0.3); crownG.add(sp);
+    const gem=new THREE.Mesh(new THREE.SphereGeometry(0.035,12,10),new THREE.MeshPhysicalMaterial({color:[0xff4fa3,0x6ee7f9,0x9be37a,0xff6b4a,0xb48cff][i],clearcoat:1,roughness:0.1})); gem.position.set(Math.cos(a)*0.3,0.27,Math.sin(a)*0.3); crownG.add(gem); }
+  crownG.add(glow(0xffd166,1.2)); }
+/* زهور وفراشات المفاجأة (للنبتة) */
+const bonus=new THREE.Group(); scene.add(bonus); bonus.visible=false;
+const bonusFlowers=[]; for(let i=0;i<7;i++){ const g=new THREE.Group(); const c=new THREE.Mesh(new THREE.SphereGeometry(0.07,16,12),new THREE.MeshPhysicalMaterial({color:0xffd23f}));
+  g.add(c); for(let k=0;k<6;k++){ const p=new THREE.Mesh(new THREE.SphereGeometry(0.07,12,10),new THREE.MeshPhysicalMaterial({color:[0xff4fa3,0xb48cff,0xff8a5c,0x6ee7f9][i%4]})); p.scale.set(1.4,0.6,0.3); const a=k/6*Math.PI*2; p.position.set(Math.cos(a)*0.11,Math.sin(a)*0.11,-0.01); p.rotation.z=a; g.add(p); }
+  g.position.set(-1.6+i*0.53,-1.0+(i%2)*0.1,0.5); g.scale.setScalar(0.001); bonus.add(g); bonusFlowers.push(g); }
+const butterflies=[0,1,2].map(i=>{ const g=new THREE.Group(); [-1,1].forEach(sd=>{ const w=new THREE.Mesh(new THREE.CircleGeometry(0.09,16),new THREE.MeshBasicMaterial({color:[0xff9ad5,0x9fd8ff,0xffe08a][i],side:THREE.DoubleSide,transparent:true,opacity:0.95})); w.position.x=sd*0.08; w.userData.sd=sd; g.add(w); }); bonus.add(g); return g; });
+
+/* ---------- نجوم الهالة ---------- */
+const starTex=(()=>{ const c=document.createElement("canvas"); c.width=c.height=128; const g=c.getContext("2d"); g.translate(64,64); g.beginPath();
+  for(let i=0;i<10;i++){ const r=i%2?24:56, a=-Math.PI/2+i*Math.PI/5; g.lineTo(Math.cos(a)*r,Math.sin(a)*r); } g.closePath();
+  g.fillStyle="#ffd166"; g.shadowColor="#ffd166"; g.shadowBlur=18; g.fill(); return new THREE.CanvasTexture(c); })();
+const starSprites=[0,1,2].map(()=>{ const s=new THREE.Sprite(new THREE.SpriteMaterial({map:starTex,transparent:true,opacity:0,depthWrite:false,fog:false})); s.scale.set(0.34,0.34,1); scene.add(s); return s; });
+const starEarnedAt=[-10,-10,-10];
+
+/* ---------- شرارات ومؤثرات صوتية ---------- */
+const sparks=[]; for(let i=0;i<50;i++){ const sp=glow([0xffd166,0x6ee7f9,0xff7a59,0xb4f8a0][i%4],0.16); sp.material.opacity=0; scene.add(sp); sparks.push({sp,v:V(),life:0}); }
+function burst(origin){ sparks.forEach(o=>{ o.sp.position.copy(origin); o.v.set(Math.random()-.5,Math.random()*0.9+.1,Math.random()-.5).normalize().multiplyScalar(1.6+Math.random()*2.2); o.life=1; }); }
+let audioCtx=null, analyser=null, abuf=null, curAudio=null, curItem=null, noiseBuf=null;
+function initAudio(){
+  try{ if(!audioCtx){ audioCtx=new (window.AudioContext||window.webkitAudioContext)(); analyser=audioCtx.createAnalyser(); analyser.fftSize=512; abuf=new Uint8Array(analyser.fftSize); analyser.connect(audioCtx.destination); }
+    if(audioCtx.state==="suspended") audioCtx.resume(); }catch(e){ log("audio ctx: "+e.message); }
+}
+function sfx(kind){
+  if(!audioCtx) return; const A=audioCtx, t0=A.currentTime;
+  const env=(g,peak,att,dec,at)=>{ g.gain.setValueAtTime(0.0001,at); g.gain.exponentialRampToValueAtTime(peak,at+att); g.gain.exponentialRampToValueAtTime(0.0001,at+att+dec); };
+  const tone=(f,type,peak,at,dec,f2)=>{ const o=A.createOscillator(), g=A.createGain(); o.type=type; o.frequency.setValueAtTime(f,at); if(f2) o.frequency.exponentialRampToValueAtTime(f2,at+dec); env(g,peak,0.012,dec,at); o.connect(g); g.connect(A.destination); o.start(at); o.stop(at+dec+0.05); };
+  if(kind==="pop") tone(540+Math.random()*240,"sine",0.035,t0,0.12,260);
+  else if(kind==="chime"){ tone(880,"sine",0.035,t0,0.6); tone(1320,"sine",0.025,t0+0.07,0.6); }
+  else if(kind==="success"){ [523,659,784,1047].forEach((f,i)=>tone(f,"triangle",0.045,t0+i*0.09,0.35)); }
+  else if(false){
+    if(!noiseBuf){ noiseBuf=A.createBuffer(1,A.sampleRate*0.8,A.sampleRate); const d=noiseBuf.getChannelData(0); for(let i=0;i<d.length;i++) d[i]=Math.random()*2-1; }
+    const src=A.createBufferSource(); src.buffer=noiseBuf; const bp=A.createBiquadFilter(); bp.type="bandpass"; bp.Q.value=1.2;
+    bp.frequency.setValueAtTime(kind==="ring"?600:350,t0); bp.frequency.exponentialRampToValueAtTime(kind==="ring"?1800:2200,t0+0.55);
+    const g=A.createGain(); env(g,kind==="ring"?0.03:0.045,0.15,0.5,t0); src.connect(bp); bp.connect(g); g.connect(A.destination); src.start(t0); src.stop(t0+0.75);
+  }
+}
+
+/* ---------- الحالة ---------- */
+let mode="idle";
+let focus=null, pendingFocus=null, focusSince=-10, happyUntil=0, encourageUntil=0, sorryUntil=0, mouthLevel=0;
+const featured={p:0,n:0,e:0};
+function requestFocus(p){ pendingFocus=p; }
+const W={p:1,n:1,e:1,o:1,open:0,pop:0,point:0};
+function targets(){
+  const D=0.15,B=1.6;
+  switch(focus){
+    case "nucleus": return {p:B,n:B,e:D,o:D,open:1,pop:0,point:1};
+    case "proton":  return {p:B,n:0.3,e:D,o:D,open:1,pop:1,point:1};
+    case "neutron": return {p:0.3,n:B,e:D,o:D,open:1,pop:1,point:1};
+    case "electron":return {p:1,n:1,e:B,o:0.6,open:0,pop:0,point:1};
+    case "orbit":   return {p:1,n:1,e:1,o:B,open:0,pop:0,point:1};
+    default:        return {p:1,n:1,e:1,o:1,open:0,pop:0,point:focus?1:0};
+  }
+}
+let countType=null, countN=0, countStart=-10, pendingCount=null;
+function requestCount(type,n){ pendingCount={type,n}; if(focus===type){ countType=type; countN=n; countStart=clock.getElapsedTime(); pendingCount=null; } }
+
+const clock=new THREE.Clock(); let nextBlink=2;
+const camDir=V(), tp=V(), tmp=V();
+function applyTopic(){
+  atom.visible=topic==="atom"; hands.forEach(h=>h.g.visible=topic==="atom"); plant.visible=topic==="plant";
+  if(topic==="atom") buildElement(DEFAULT_Z); else { plantT0=clock.getElapsedTime(); plantStage=3; stageT[1]=plantT0+1.3; stageT[2]=plantT0+2.5; stageT[3]=plantT0+3.9; roots.forEach(r=>r.userData.snd=false); leaves.forEach(L=>L.snd=false); flower.userData.snd=false; }
+  try{ localStorage.setItem("atom:topic",JSON.stringify(topic)); }catch(e){}
+  log("topic: "+topic);
+}
+function targetPoint(out){
+  if(topic==="plant"){
+    if(focus==="root") return out.copy(plant.localToWorld(roots[1].userData.curve.getPointAt(0.7).clone()));
+    if(focus==="stem") return out.copy(plant.localToWorld(stem.userData.curve.getPointAt(0.42).clone()));
+    if(focus==="leaf"){ const L=leaves[featured.p%leaves.length]; return out.copy(L.m.localToWorld(new THREE.Vector3(0.3,0,0))); }
+    if(focus==="flower") return flower.getWorldPosition(out).add(new THREE.Vector3(0,FLOWER_R+0.25,0));
+    if(focus==="seed") return fruit.getWorldPosition(out);
+    return null;
+  }
+  if(focus==="proton"&&protons[featured.p]) return protons[featured.p].getWorldPosition(out);
+  if(focus==="neutron"&&neutrons[featured.n]) return neutrons[featured.n].getWorldPosition(out);
+  if(focus==="nucleus") return body.getWorldPosition(out).add(new THREE.Vector3(0,-0.15,ATOM_R*0.6));
+  if((focus==="electron"||focus==="orbit")&&electrons[featured.e]) return electrons[featured.e].g.getWorldPosition(out);
+  return null;
+}
+buildElement(DEFAULT_Z); applyTopic();
+
+/* ---------- السلوك المشترك للوجه ---------- */
+function faceBehavior(F,holder,t,hasT,happy){
+  const st={gx:0,gy:0,lid:0,low:0,browY:0,browT:0,open:mouthLevel,cheeks:0.42,bigSmile:false,smallO:false,oneBrow:false};
+  // اتجاه الرأس: نحو الطالبة، ويلتفت قليلاً نحو الجزء المشروح
+  const hp0=holder.getWorldPosition(V());
+  const look=V().set(camera.position.x,hp0.y+0.15,camera.position.z);   // تنظر للأمام بمستوى عينيها
+  const glanceBack=askLook||((t-focusSince)%4.2)>3.4;               // انتباه مشترك + تنظر للطالبة وهي تسأل
+  if(hasT&&W.point>0.3&&!glanceBack) look.lerp(tp,0.3);
+  const hp=holder.getWorldPosition(V()); const m=new THREE.Matrix4().lookAt(look,hp,new THREE.Vector3(0,1,0));
+  const q=new THREE.Quaternion().setFromRotationMatrix(m); const parentQ=holder.parent.getWorldQuaternion(new THREE.Quaternion()).invert();
+  q.premultiply(parentQ); holder.quaternion.slerp(q,0.08);
+  if(mode==="hearing") holder.rotateZ(0.12+Math.sin(t*4.5)*0.04);
+  if(mode==="thinking") holder.rotateZ(Math.sin(t*1.3)*0.05);
+  // العينان
+  if(hasT&&W.point>0.3&&!glanceBack){ const l=F.g.worldToLocal(tp.clone()).normalize(); st.gx=l.x; st.gy=l.y; }
+  else if(mode==="thinking"){ st.gx=Math.sin(t*1.1)*0.4; st.gy=0.6; }
+  else { st.gx=Math.sin(t*0.7)*0.05; st.gy=0.08+Math.sin(t*0.9)*0.03; }
+  // الرمش
+  if(t>nextBlink){ const k=(t-nextBlink)/0.16; st.lid=k<1?1-Math.abs(1-2*k):0; if(k>=1) nextBlink=t+2.8+Math.random()*2.5; }
+  // المشاعر
+  if(mode==="hearing"){ st.browY=1; st.lid=Math.max(st.lid,-0.1); }
+  else if(mode==="thinking"){ st.oneBrow=true; st.browY=0.5; st.lid=Math.max(st.lid,0.15); st.smallO=true; }
+  if(happy){ st.low=1; st.browY=0.8; st.bigSmile=true; st.cheeks=0.7; }
+  else if(t<encourageUntil){ st.browY=0.6; st.browT=-0.6; st.cheeks=0.5; }
+  if(t<sorryUntil){ st.browY=0.4; st.browT=-0.9; st.smallO=true; holder.rotateY(Math.sin(t*10)*0.12); }
+  updateFace(F,st,t);
+}
+
+/* ---------- الحلقة الرئيسية ---------- */
+function loop(){
+  requestAnimationFrame(loop);
+  const t=clock.getElapsedTime(), dt=Math.min(0.05,t-(loop.lt||t)); loop.lt=t;
+  if(curAudio&&curItem&&curAudio.duration&&isFinite(curAudio.duration)){
+    const f=curAudio.currentTime/curAudio.duration; let i=curItem.cum.findIndex(c=>c>f); if(i<0) i=curItem.cum.length-1;
+    if(i!==curItem.lastIdx&&!curItem.filler){ curItem.lastIdx=i; onChunk(curItem.chunks[i]); }
+  }
+  if(countType&&t-countStart>countN*1.3+6){ countType=null; }   // ينتهي العدّ فتعود الحبات لطبيعتها
+  const countLock=countType&&t-countStart<countN*1.3+1.5;
+  if(pendingFocus!==focus && t-focusSince>=2 && !countLock){ focus=pendingFocus; focusSince=t; countType=null;
+    if(focus) sfx("chime");
+    if(pendingCount&&pendingCount.type===focus){ countType=focus; countN=pendingCount.n; countStart=t; pendingCount=null; }
+    featured.p=Math.floor(Math.random()*Math.max(1,topic==="plant"?leaves.length:protons.length)); featured.n=Math.floor(Math.random()*Math.max(1,neutrons.length));
+    featured.e=electrons.length-1-Math.floor(Math.random()*Math.min(3,electrons.length)); }
+  const T=targets(); for(const k in W) W[k]=ease(W[k],T[k],0.045);
+  const happy=t<happyUntil;
+  camera.position.set(Math.sin(t*0.13)*0.18,0.25+Math.sin(t*0.19)*0.06,7.6); camera.lookAt(0,0,0); camera.updateMatrixWorld();   // حركة منظور خفيفة
+  // الصوت ← الفم
+  let mt=0;
+  if(curAudio&&analyser){ analyser.getByteTimeDomainData(abuf); let s=0; for(let i=0;i<abuf.length;i++){ const v=(abuf[i]-128)/128; s+=v*v; } mt=Math.min(1,Math.sqrt(s/abuf.length)*7); }
+  else if(mode==="speaking"&&!curItem&&window.speechSynthesis&&speechSynthesis.speaking) mt=0.25+Math.abs(Math.sin(t*13))*0.6;
+  mouthLevel=ease(mouthLevel,mt,0.35);
+  const hasT=!!targetPoint(tp);
+  let charCenter, headHolder, F;
+
+  if(topic==="atom"){
+    const bt=t-buildT0, pop=Math.min(1,bt/0.8), popE=pop<1?1-Math.pow(1-pop,3)*(1-Math.sin(pop*Math.PI)*0.4):1;
+    atom.scale.setScalar(Math.max(0.001,popE*(shells.children.length>2?0.92:1.05)));
+    atom.position.y=0.12+(happy?Math.abs(Math.sin(t*8))*0.15:Math.sin(t*1.1)*0.05);
+    shells.rotation.x=-1.05+Math.sin(t*0.3)*0.08; shells.rotation.y=Math.sin(t*0.17)*0.15;
+    const breathe=1+Math.sin(t*2.2)*0.012;
+    body.scale.setScalar(breathe*(1+Math.max(0,(W.p+W.n)/2-1)*0.08));
+    nucSkin.opacity=1-W.open*0.78; nucSkin.depthWrite=nucSkin.opacity>0.6; nucSphere.renderOrder=nucSkin.opacity<0.9?2:0;
+    nucGlow.material.opacity=0.24+Math.max(0,(W.p+W.n)/2-1)*0.3+(covered.has('n')?0.12:0)+(covered.has('pn')?0.08:0);
+    particles.rotation.y=t*0.2; particles.visible=W.open>0.03;
+    camDir.copy(camera.position).sub(body.getWorldPosition(tmp)).normalize();
+    const popTarget=body.getWorldPosition(V()).addScaledVector(camDir,ATOM_R+0.3).add(tmp.set(0.55,0.35,0));
+    const applyPart=(arr,w,isP)=>arr.forEach((m,i)=>{
+      const u=m.userData; m.material.opacity=Math.min(1,w)*W.open; m.material.emissive=m.material.emissive||new THREE.Color(); m.material.emissive.setScalar(Math.max(0,w-1)*0.22);
+      const pos=V().copy(u.base);
+      const isF=(focus===(isP?"proton":"neutron"))&&i===(isP?featured.p:featured.n)&&countType!==focus;
+      const counted=countType===(isP?"proton":"neutron")&&i<countN&&(t-countStart)/1.3>=i;
+      const counting=countType===(isP?"proton":"neutron")&&t-countStart<countN*1.3+1.5;
+      if(counting&&!counted) m.material.opacity*=0.35;
+      if(counted) m.material.emissive.setScalar(0.75);
+      if(isF){ pos.lerp(particles.worldToLocal(popTarget.clone()),W.pop); m.scale.setScalar(1+W.pop*0.7); } else m.scale.setScalar(ease(m.scale.x,counted?1.45:1,0.15));
+      m.position.lerp(pos,0.12); u.sym.material.opacity=Math.max(0,Math.min(1,(w-1)*1.8))*W.open;
+    });
+    applyPart(protons,W.p,true); applyPart(neutrons,W.n,false);
+    rings.forEach(r=>{ const k=Math.max(0,Math.min(1,(bt-r.appear)/0.7)), ek=1-Math.pow(1-k,3);
+      if(k>0&&!r.snd){ r.snd=true; }
+      r.g.scale.setScalar(0.2+0.8*ek); const base=(focus==="orbit"?1:Math.min(1,W.o))*(covered.has('e')?1.15:1);
+      r.coreM.opacity=ek*0.9*base; r.glowM.opacity=ek*0.16*base*(focus==="orbit"?2:1);
+      r.num.material.opacity=ease(r.num.material.opacity,focus==="orbit"?1:0,0.08); });
+    const eSpeed=1-Math.max(0,W.e-1)*0.5;
+    electrons.forEach((x,i)=>{
+      const ra=rings[x.ring]; const show=Math.max(0,Math.min(1,(bt-ra.appear-0.5)/0.5));
+      const a=t*x.speed*eSpeed+x.off; x.g.position.set(Math.cos(a)*x.R,Math.sin(a)*x.R,0);
+      const counted=countType==="electron"&&i<countN&&(t-countStart)/0.7>i;
+      const big=counted?1.7:(((focus==="electron"||focus==="orbit")&&i===featured.e&&countType!=="electron")?1+W.point*0.9:1);
+      x.c.material.opacity=Math.min(1,W.e)*show; x.gl.material.opacity=Math.min(1,W.e)*0.85*show;
+      const sc=0.6*(1+Math.max(0,W.e-1)*0.6)*big; x.gl.scale.set(sc,sc,1); x.c.scale.setScalar(big);
+      const sa=Math.max(0,Math.min(1,(W.e-1)*1.8)); x.sym.material.opacity=sa*show; x.c.visible=sa<0.5;
+      x.trail.forEach((ts,k)=>{ const aa=a-(k+1)*0.075/x.R; ts.position.set(Math.cos(aa)*x.R,Math.sin(aa)*x.R,0); ts.material.opacity=0.55*(1-k/7)*Math.min(1,W.e)*show; });
+    });
+    atomFace.g.position.set(0,W.open*ATOM_R*0.7,W.open*0.12); atomFace.g.scale.setScalar(1-0.3*W.open);   // الوجه يرتفع قليلاً ليكشف داخل النواة
+    F=atomFace; headHolder=atomFace.g; charCenter=body.getWorldPosition(V());
+    // اليدان الطافيتان
+    const pointSide=hasT?(tp.x>=charCenter.x?1:0):-1;
+    hands.forEach((h,i)=>{
+      const side=i===0?-1:1;
+      const rest=V().copy(charCenter).add(tmp.set(side*(ATOM_R+0.3),-0.28+Math.sin(t*1.6+i)*0.05,0.35));
+      let goal=rest.clone();
+      if(happy) goal=V().copy(charCenter).add(tmp.set(side*(ATOM_R+0.2),ATOM_R*0.95+Math.abs(Math.sin(t*8))*0.1,0.3));
+      else if(sessionWave(t)&&i===1) goal=V().copy(charCenter).add(tmp.set(ATOM_R+0.35,0.45+Math.sin(t*9)*0.12,0.3));
+      else if(mode==="speaking"&&pointSide!==i) goal.add(tmp.set(0,Math.sin(t*3+i)*0.08,Math.cos(t*2.5)*0.05));
+      if(pointSide===i&&W.point>0.2){ const dir=V().copy(tp).sub(rest); const d=dir.length(); goal=rest.clone().addScaledVector(dir.normalize(),Math.min(d*0.45,1.2)*W.point); }
+      h.pos.lerp(goal,0.08); h.g.position.copy(h.pos);
+      if(pointSide===i&&W.point>0.2) h.g.lookAt(tp); else h.g.lookAt(V().copy(h.pos).add(tmp.set(0,0.5,1)));
+    });
+    if(hasT&&pointSide>=0){ const ft=hands[pointSide].finger.getWorldPosition(V()); setBeam(ft,tp); }
+  } else {
+    plantUpdate(t,hasT,happy);
+    F=plantFace; charCenter=flower.getWorldPosition(V());
+    headHolder=F.g;
+    if(hasT&&plantStage>=2){ const lh=leafHands[tp.x>=plant.localToWorld(stem.userData.curve.getPointAt(0.8).clone()).x?1:0]; setBeam(lh.tip.getWorldPosition(V()),tp); }
+  }
+  faceBehavior(F,headHolder,t,hasT,happy);
+  beam.material.opacity=hasT?0.4*W.point:0; tip.material.opacity=hasT?0.7*W.point*(0.7+Math.sin(t*7)*0.3):0;
+
+  // اللافتة
+  drawPill(label,focus?LABELS[focus]:"",64,"rgba(110,231,249,.9)");
+  if(hasT) label.sp.position.copy(tp).add(tmp.set(0,0.45,0.25));
+  label.sp.material.opacity=ease(label.sp.material.opacity,(focus&&t-focusSince<5)?1:0,0.08);
+
+  // نجوم الهالة حول الشخصية، وتاج + اسم عند الثالثة
+  const crown=false;
+  const headTop=V().copy(charCenter).add(tmp.set(0,(topic==="plant"?FLOWER_R+0.35:ATOM_R+0.45),0));
+  // النجوم: تظهر لحظة بجانب الشخصية، ثم تطير إلى زاوية هادئة (مبدأ التماسك)
+  const halfH=Math.tan(THREE.MathUtils.degToRad(camera.fov/2))*5, halfW=halfH*camera.aspect;
+  starSprites.forEach(sp=>sp.material.opacity=0); if(false) starSprites.forEach((sp,i)=>{ const got=i<stars, since=t-starEarnedAt[i];
+    const corner=camera.localToWorld(new THREE.Vector3(halfW-0.32-i*0.36,halfH-0.3,-5));
+    const near=V().copy(charCenter).add(tmp.set(0.55,0.35,0.4));
+    let p, sc=0.2, op=got?0.55:0;
+    if(got&&since<0.9){ p=near; sc=0.34*(1+Math.sin(Math.min(1,since/0.9)*Math.PI)*0.7); op=1; }
+    else if(got&&since<1.8){ const k=(since-0.9)/0.9, e=k*k*(3-2*k); p=V().copy(near).lerp(corner,e); sc=0.34+(0.2-0.34)*e; op=1-0.45*e; }
+    else p=corner;
+    sp.position.copy(p); sp.scale.set(sc,sc,1); sp.material.opacity=ease(sp.material.opacity,op,0.25); sp.material.rotation=0; });
+
+  const showName=false;
+  drawPill(nameTag,showName?((studentName?studentName+"، ":"")+(topic==="plant"?"صديقة النبات الصغيرة":"عالِمة الذرة الصغيرة")):"",70,"rgba(255,209,102,.95)");
+  nameTag.sp.position.copy(headTop).add(tmp.set(0,0.45,0.35)); nameTag.sp.position.y=Math.min(nameTag.sp.position.y,2.05); nameTag.sp.material.opacity=ease(nameTag.sp.material.opacity,showName?1:0,0.08);
+
+  if(countType){ const k=Math.floor((t-countStart)/1.3); if(k!==loop.lastCount&&k<countN&&k>=0){ loop.lastCount=k; sfx("pop"); } } else loop.lastCount=-1;
+  // مفاجأة النجمة الثالثة
+  const surp=celebrating?Math.max(0,Math.min(1,(t-surpriseAt)/0.8)):0;
+  crownG.visible=surp>0&&atom.visible;
+  if(crownG.visible){ const top=V().copy(charCenter).add(tmp.set(0,(topic==="plant"?activeFaceR():ATOM_R)*(topic==="plant"?1:1)+0.12,0));
+    crownG.position.lerp(top,0.2); if(surp<1) crownG.position.y=top.y+(1-surp)*1.5; crownG.rotation.y=t*0.8; crownG.scale.setScalar(topic==="plant"?activeFaceR()/0.55:1.15); }
+  if(topic==="atom") electrons.forEach(x=>{ x.c.material.color.setHex(surp>0?0xffd166:0xd8fbff); x.c.material.emissive.setHex(surp>0?0x7a5200:0x3fd4ff); x.gl.material.color.setHex(surp>0?0xffd166:0x6ee7f9); });
+  bonus.visible=topic==="plant"&&surp>0;
+  if(bonus.visible){ bonusFlowers.forEach((g,i)=>{ const k=Math.max(0,Math.min(1,(t-surpriseAt-0.4-i*0.12)/0.5)); g.scale.setScalar(Math.max(0.001,k)); g.rotation.z=Math.sin(t*2+i)*0.1; });
+    butterflies.forEach((b,i)=>{ const a=t*0.9+i*2.1; b.position.set(Math.cos(a)*1.3,0.6+Math.sin(t*1.7+i)*0.5,Math.sin(a)*0.6+0.4); b.rotation.y=-a; b.children.forEach(w=>w.rotation.y=w.userData.sd*Math.abs(Math.sin(t*14+i))*1.1); }); }
+  if(celebrating && t>surpriseAt && t-surpriseAt<5 && Math.floor((t-surpriseAt)/0.7)!==loop.lastFw){ loop.lastFw=Math.floor((t-surpriseAt)/0.7); burst(V().copy(charCenter).add(tmp.set((Math.random()-.5)*2.4,0.8+Math.random()*0.8,0.4))); if(loop.lastFw%2===0) sfx("success"); }
+  // الشرارات
+  sparks.forEach(o=>{ if(o.life>0){ o.life-=dt*0.9; o.v.y-=dt*2.2; o.sp.position.addScaledVector(o.v,dt); o.sp.material.opacity=Math.max(0,o.life); } else o.sp.material.opacity=0; });
+  if(happy&&!loop.wasHappy){ burst(V().copy(charCenter).add(tmp.set(0,0.5,0.4))); sfx("success"); }
+  loop.wasHappy=happy;
+
+  // اختفاء الشخصية بعد الوداع
+  if(endingAt&&t>endingAt){ goneFade=Math.min(1,goneFade+dt/1.2);
+    if(goneFade>=1&&atom.visible){ atom.visible=false; hands.forEach(h=>h.g.visible=false); crownG.visible=false; $("mic").classList.add("gone"); stopListening(); log("session: character gone, waiting for button"); } }
+  if(goneFade>0&&goneFade<1){ atom.scale.multiplyScalar(1-goneFade); hands.forEach(h=>h.g.scale.setScalar(1-goneFade)); crownG.scale.multiplyScalar(1-goneFade); }
+  // أرضية وحلقة الاستماع
+  floor.position.y=topic==="plant"?-2.1:-1.75; ring.position.y=floor.position.y+0.03;
+  floor.material.opacity=0.55+Math.sin(t*1.2)*0.08;
+  const ready=(!!rec||azRunning)&&mode==="idle"&&!J.busy;
+  const rt=mode==="hearing"?.8:mode==="thinking"?.5:ready?.28+Math.sin(t*2.5)*0.08:0;
+  ring.material.opacity=ease(ring.material.opacity,rt,0.1); ring.material.color.setHex(mode==="thinking"?0xffd166:0x6ee7f9);
+  ring.scale.setScalar(mode==="hearing"?1+Math.sin(t*4)*0.05:1);
+  renderer.render(scene,camera);
+}
+function setBeam(a,b){ beamGeo.attributes.position.setXYZ(0,a.x,a.y,a.z); beamGeo.attributes.position.setXYZ(1,b.x,b.y,b.z); beamGeo.attributes.position.needsUpdate=true; beam.computeLineDistances(); tip.position.copy(b); }
+function sessionWave(t){ return sessionEnded&&mode==="speaking"; }
+
+/* ---------- تحديث النبتة ---------- */
+function plantUpdate(t,hasT,happy){
+  const gt=t-plantT0;
+  const grow=(a,b)=>{ const k=Math.max(0,Math.min(1,(gt-a)/(b-a))); return 1-Math.pow(1-k,3); };
+  plant.rotation.y=Math.sin(t*0.22)*0.3;
+  plant.position.y=-0.2+(happy?Math.abs(Math.sin(t*8))*0.1:0);
+  // المرحلة تتقدم عند الكلام عن الجزء
+
+  const G=(st,a,b)=>{ if(plantStage<st) return 0; const k=Math.max(0,Math.min(1,(t-stageT[st]-a)/(b-a))); return 1-Math.pow(1-k,3); };
+  const k1=G(1,0,1.4), k2=G(2,0,1.4), k3=G(3,0,1.2);
+  // البذرة: كبيرة في البداية، وتنزل إلى التراب حين تطلع الساق
+  const seedIntro=Math.min(1,gt/0.5);
+  seedG.scale.setScalar(Math.max(0.001,seedIntro*(gt<1.3?1:Math.max(0.5,1-(gt-1.3)))*(focus==="seed"?1.35:1)));
+  seedGlow.material.opacity=ease(seedGlow.material.opacity,focus==="seed"?0.9:(gt<1.5?0.6:0),0.08);
+  // البرعم بوجه في المرحلة 2، ثم يتحول زهرة في 3
+  budG.position.copy(stem.userData.curve.getPointAt(1)).add(tmp.set(0,0.18,0.03)); budG.scale.setScalar(Math.max(0.001,G(2,0.8,1.6)*(1-k3)));
+  budFace.g.visible=false;
+  roots.forEach((r,i)=>{ const k=Math.max(0,Math.min(1,(G(1,0,1.6)*1.15-i*0.07))); r.geometry.setDrawRange(0,Math.floor(r.userData.count*k/6)*6); if(k>0&&!r.userData.snd){ r.userData.snd=true; if(i===0) sfx("ring"); } });
+  const ks=k2; stem.geometry.setDrawRange(0,Math.floor(stem.userData.count*ks/6)*6);
+  const T={root:1,stem:1,leaf:1,flower:1,seed:1}; if(focus&&focus in T){ for(const k in T) T[k]=0.35; T[focus]=1.7; }
+  for(const k in PW) PW[k]=ease(PW[k],T[k],0.06);
+  const em=(mat,w)=>{ mat.opacity=Math.min(1,w); if(mat.emissive) mat.emissive.setScalar(Math.max(0,w-1)*0.3); };
+  em(rootMat,PW.root); em(stemMat,PW.stem); em(fruitMat,PW.seed); petals.forEach(p=>em(p.pm.material,Math.max(0.6,PW.flower)));
+  const cg=(m,key)=>{ if(covered.has(key)&&m.emissive) m.emissive.setScalar(Math.max(m.emissive.r,0.12+Math.sin(t*2)*0.03)); };
+  cg(rootMat,'r'); cg(stemMat,'sl'); cg(fruitMat,'f'); petals.forEach(p=>cg(p.pm.material,'f'));
+  leaves.forEach((L,i)=>{ const k=G(2,0.6+i*0.25,1.2+i*0.25); if(k>=1&&!L.snd){ L.snd=true; sfx("pop"); }
+    const counted=countType==="leaf"&&i<countN&&(t-countStart)/0.5>i;
+    L.g.scale.setScalar(Math.max(0.001,k*(1+Math.sin(t*1.4+i)*0.03)*(counted?1.25:1)*(1+Math.max(0,PW.leaf-1)*0.15)));
+    em(L.m.material,PW.leaf); cg(L.m.material,'sl'); if(counted) L.m.material.emissive.setScalar(0.45); });
+  // الورقتان-اليدان
+  const kh=G(2,1.0,1.6);
+  leafHands.forEach((h,i)=>{
+    const hc=countType==="leaf"&&(4+i)<countN&&(t-countStart)/0.5>(4+i);
+    h.pivot.scale.setScalar(Math.max(0.001,kh*(hc?1.25:1))); h.m.material.emissive.setScalar(hc?0.45:Math.max(0,PW.leaf-1)*0.3);
+    let ang=h.side>0?0.45+Math.sin(t*1.5)*0.08:Math.PI-0.45-Math.sin(t*1.5)*0.08;
+    if(happy) ang=h.side>0?1.1+Math.sin(t*9)*0.2:Math.PI-1.1-Math.sin(t*9)*0.2;
+    else if(sessionWave(t)&&h.side>0) ang=1.0+Math.sin(t*9)*0.45;
+    else if(mode==="speaking") ang+=Math.sin(t*3+i)*0.12;
+    if(hasT&&W.point>0.2){ const local=plant.worldToLocal(tp.clone()).sub(h.pivot.position);
+      const wantSide=local.x>=0?1:-1; if(wantSide===h.side) ang=Math.atan2(local.y,local.x); }
+    while(ang-h.ang>Math.PI) ang-=Math.PI*2; while(ang-h.ang<-Math.PI) ang+=Math.PI*2;
+    h.ang=ease(h.ang,ang,0.08); h.pivot.rotation.set(0,0,h.ang);
+  });
+  const kf=k3; flower.scale.setScalar(Math.max(0.001,kf*(1+Math.max(0,PW.flower-1)*0.12)));
+  petals.forEach(p=>{ p.pg.rotation.y=(1-kf)*1.2; }); if(kf>0.5&&!flower.userData.snd){ flower.userData.snd=true; sfx("chime"); }
+  const kr=G(3,0.8,1.6); fruitG.scale.setScalar(Math.max(0.001,kr*(1+Math.max(0,PW.seed-1)*0.5)));
+  const showSeeds=focus==="seed"; fruitMat.opacity=showSeeds?0.35:Math.min(1,PW.seed); seeds.forEach(sd=>sd.visible=showSeeds&&kr>0.9);
+  const water=focus==="root"||focus==="stem";
+  drops.forEach(o=>{ const u=plantStage>=2&&k2>0.9?(t*0.25+o.ph)%1:((t*0.25+o.ph)%1)*0.4; const p=u<0.4?roots[1].userData.curve.getPointAt(1-u/0.4):stem.userData.curve.getPointAt((u-0.4)/0.6*0.95);
+    o.d.position.copy(p).add(tmp.set(0,0,0.08)); o.d.material.opacity=ease(o.d.material.opacity,water?0.9:0,0.08); });
+  const sunOn=focus==="leaf";
+  sun.material.opacity=ease(sun.material.opacity,sunOn?0.85:0,0.05);
+  rays.forEach((o,i)=>{ const L=leaves[i%leaves.length]; const lp=plant.worldToLocal(L.m.localToWorld(new THREE.Vector3(0.3,0,0))); const u=(t*0.5+o.ph)%1;
+    o.r.position.lerpVectors(sun.position,lp,u); o.r.material.opacity=sunOn?0.8*(1-u*0.5):0; });
+  bee.visible=focus==="flower"||focus==="seed";
+  if(bee.visible){ const a=t*1.6; bee.position.set(Math.cos(a)*0.7,1.45+Math.sin(t*3)*0.06,Math.sin(a)*0.45); bee.rotation.y=-a; wings.forEach(w=>w.scale.set(0.15,0.15*(0.6+Math.abs(Math.sin(t*40))),1)); }
+}
+requestAnimationFrame(loop);
+
+/* ---------- الكلام ---------- */
+let voice=null;
+function pickVoice(){ const vs=speechSynthesis.getVoices(); const ar=vs.filter(v=>/^ar/i.test(v.lang));
+  voice=ar.find(v=>/premium|enhanced|محسّن|ممتاز/i.test(v.name))||ar.find(v=>/^ar-SA/i.test(v.lang))||ar[0]||null; }
+if(window.speechSynthesis){ pickVoice(); speechSynthesis.onvoiceschanged=pickVoice; }
+const esc=t=>t.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+async function elevenBlob(text,tries){
+  tries=tries||0;
+  if(useServerVoice()){
+    let r=await fetch("/.netlify/functions/tts",{method:"POST",headers:srvHeaders(),body:JSON.stringify({text,model_id:elModel})});
+    if(r.status===401&&await askAccess()) r=await fetch("/.netlify/functions/tts",{method:"POST",headers:srvHeaders(),body:JSON.stringify({text,model_id:elModel})});
+    log("tts(server): status "+r.status);
+    if((r.status===429||r.status>=500)&&tries<3){ await new Promise(z=>setTimeout(z,600+tries*500)); return elevenBlob(text,tries+1); }
+    if(!r.ok) throw new Error("tts "+r.status);
+    return URL.createObjectURL(await r.blob());
+  }
+  const r=await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(elVoice)}?output_format=mp3_44100_128`,{method:"POST",
+    headers:{"xi-api-key":elKey,"Content-Type":"application/json","Accept":"audio/mpeg"},
+    body:JSON.stringify(Object.assign({text,model_id:elModel,seed:4242,voice_settings:{stability:0.8,similarity_boost:0.75,style:0.0,use_speaker_boost:true}},/flash_v2_5|turbo_v2_5|eleven_v3/.test(elModel)?{language_code:"ar"}:{}))});
+  log("eleven: status "+r.status);
+  if((r.status===429||r.status>=500)&&tries<3){ await new Promise(z=>setTimeout(z,500+tries*500)); return elevenBlob(text,tries+1); }
+  if(!r.ok){ const e=await r.text().catch(()=>""); log("eleven error: "+e.slice(0,160)); throw new Error("eleven "+r.status); }
+  return URL.createObjectURL(await r.blob());
+}
+/* قاموس النطق: يُحفظ من صفحة التجربة */
+function loadPron(){ try{ return JSON.parse(localStorage.getItem("atom:pron"))||{}; }catch(e){ return {}; } }
+const FORCED=[["الذرات","الذَّرَّات"],["الذرة","الذَّرَّة"],["ذرات","ذَرَّات"],["ذرة","ذَرَّة"],["للذرة","لِلذَّرَّة"],["عالمة","عالِمة"],["عالمتي","عالِمتي"],["العالمة","العالِمة"],["موجبة","مُوجبة"],["متعادلة","مُتعادلة"],["الشحنة","الشُّحنة"],["شحنة","شُحنة"],["حمص","حُمُّص"],["الحمص","الحُمُّص"]];
+const FORCED_MAP=new Map(FORCED);
+const FORCED_RE=new RegExp("(^|[^\\u0621-\\u064A])([وفبكل]{0,2})("+FORCED.map(x=>x[0]).sort((a,b)=>b.length-a.length).join("|")+")(?![\\u0621-\\u064A])","g");
+function prepEleven(text){
+  let t=text.replace(/([تك])\u0650(?=[^\u0621-\u064A]|$)/g,"$1\u0001");
+  t=strip(t).replace(/\u0001/g,"\u0650");
+  t=t.replace(/نموت(?![\u0621-\u064A])/g,"صرت");
+  t=t.replace(FORCED_RE,(m,pre,pf,w)=>pre+pf+(FORCED_MAP.get(w)||w));
+  const map=loadPron(); Object.keys(map).sort((x,y)=>y.length-x.length).forEach(k=>{ if(map[k]&&map[k]!==k) t=t.split(k).join(map[k]); });
+  return t;
+}
+async function ttsBlob(text){ return await elevenBlob(prepEleven(text)); }
+let turnId=0, speakEnd=0, speakStartAt=0, askLook=false, timeCloseSent=false, endingAt=0; const speakWins=[];
+function stopSpeak(){ if(speechDoneCb){ const cb=speechDoneCb; speechDoneCb=null; setTimeout(cb,0); } turnId++; if(curAudio){ curAudio.pause(); curAudio=null; curItem=null; } if(window.speechSynthesis) speechSynthesis.cancel(); }
+function finishSpeak(){ askLook=false;
+  const minsNow=(performance.now()-sessionStartMs)/60000;
+  if(speechDoneCb){ const cb=speechDoneCb; speechDoneCb=null; setTimeout(cb,0); }
+  if(sessionEnded&&celebrating&&!endingAt){ endingAt=clock.getElapsedTime()+4.5; }
+  else if(sessionEnded&&!celebrating&&!endingAt){ endingAt=clock.getElapsedTime()+1.5; }
+  const mins=(performance.now()-sessionStartMs)/60000;
+  
+  if(pendingCelebrate&&!celebrating){ pendingCelebrate=false; celebrating=true; surpriseAt=clock.getElapsedTime()+0.8; setTimeout(()=>answer("(رسالة من النظام: أنهت الطالبة الرحلة)"),400); }
+  speakEnd=performance.now(); speakWins.push([speakStartAt,speakEnd]); if(speakWins.length>20) speakWins.shift(); mode="idle"; curAudio=null; curItem=null; resumeRec(); setTimeout(()=>{ if(mode==="idle"){ requestFocus(null); } },1500); setTimeout(()=>{  },15000); }
+const PHRASES={fill:["ممم...","سؤال جميل!","دعيني أفكر...","آها!"],wait:"خذي وقتكِ، أنا أنتظركِ!",bye:"سأنتظركِ هنا! عندما تريدين، تكلمي معي."};
+const phraseCache={};
+const prefQ=[]; let prefBusy=false;
+function prefetch(text){ if(!useEleven()||!text||phraseCache[text]||prefQ.includes(text)) return; prefQ.push(text); pumpPref(); }
+async function pumpPref(){ if(prefBusy) return; prefBusy=true; while(prefQ.length){ const t=prefQ.shift(); if(phraseCache[t]) continue; const p=ttsBlob(t).catch(()=>null); phraseCache[t]=p; await p; await new Promise(z=>setTimeout(z,250)); } prefBusy=false; }
+function speechParts(text){ const m=text.match(/([^.!؟?]+[؟?])\s*$/); if(!m) return [text]; const st=text.slice(0,text.length-m[0].length).trim(); return st?[st,m[1].trim()]:[m[1].trim()]; }
+function prefetchPhrases(){ setTimeout(()=>prefetch(PHRASES.wait),9000); }
+function cachedItem(text){ return {text,chunks:[text],cum:[1],url:phraseCache[text]||null,keep:true}; }
+function makeItem(text){
+  if(phraseCache[text]) return cachedItem(text);
+  const chunks=splitChunks(text); const total=chunks.reduce((a,c)=>a+c.length,0)||1; let acc=0;
+  const cum=chunks.map(c=>(acc+=c.length)/total);
+  const item={text,chunks,cum};
+  if(useEleven()) item.url=ttsBlob(text).catch(e=>{ log("voice failed: "+e.message); say("",5000); sorryUntil=clock.getElapsedTime()+3; return "FAIL"; });
+  return item;
+}
+function playItem(item,id){
+  return new Promise(async res=>{
+    if(item.pause){ askLook=true; return setTimeout(res,item.pause); }
+    askLook=!!item.ask;
+    if(curAudio){ try{ curAudio.pause(); }catch(e){} curAudio=null; }
+    const url=item.url? await item.url : null;
+    if(id!==turnId) return res();
+    if(url==="FAIL") return res();                 // بلا صوت بديل: الشخصية تعتذر بإيماءة
+    if(url){
+      const a=new Audio(url); curAudio=a; curItem=item;
+      try{ if(audioCtx){ audioCtx.createMediaElementSource(a).connect(analyser); } }catch(e){}
+      a.onended=a.onerror=()=>{ if(!item.keep) URL.revokeObjectURL(url); if(curAudio===a){ curAudio=null; curItem=null; } res(); };
+      a.play().catch(()=>res());
+    }else{
+      if(!window.speechSynthesis) return res();
+      item.chunks.forEach((c,i)=>{
+        const u=new SpeechSynthesisUtterance(fixPron(c)); u.lang=voice?voice.lang:"ar-SA"; if(voice) u.voice=voice; u.rate=0.95;
+        u.onstart=()=>onChunk(c);
+        if(i===item.chunks.length-1) u.onend=u.onerror=()=>res();
+        speechSynthesis.speak(u);
+      });
+      if(!item.chunks.length) res();
+    }
+  });
+}
+function createPlayer(id){
+  const q=[]; let closed=false, running=false, started=false;
+  async function pump(){
+    if(running) return; running=true;
+    while(id===turnId && (q.length || !closed)){
+      if(!q.length){ await new Promise(r=>setTimeout(r,40)); continue; }
+      const item=q.shift();
+      if(!started){ started=true; pauseRec(); mode="speaking"; speakStartAt=performance.now(); }
+      await playItem(item,id);
+    }
+    running=false;
+    if(id===turnId){ if(started) finishSpeak(); else { mode="idle"; } }
+  }
+  let had=false;
+  return { addItem(it){ q.push(it); had=true; pump(); }, add(text){
+      if(text&&/[؟?]\s*$/.test(text)){ const m=text.match(/([^.!؟?]+[؟?])\s*$/); const qs=m?m[1].trim():""; const st=m?text.slice(0,text.length-m[0].length).trim():text;
+        if(qs&&(st||had)){ if(st){ q.push(makeItem(starBlocked?st.replace(STAR_PHRASE,""):st)); } q.push({pause:650}); const it=makeItem(qs); it.ask=true; q.push(it); had=true; pump(); return; } } if(starBlocked&&text) text=text.replace(STAR_PHRASE,""); if(text&&text.trim()){ q.push(makeItem(text)); had=true; pump(); } }, close(){ closed=true; pump(); } };
+}
+function say1(text){ stopSpeak(); const id=turnId; const pl=createPlayer(id); if(phraseCache[text]) pl.addItem(cachedItem(text)); else pl.add(text); pl.close(); }
+
+/* ---------- Claude ---------- */
+const history=[]; let aborter=null; let rejectTurn=false; let stars=0, sessionEnded=false, celebrating=false, pendingCelebrate=false, lastStudentText="", sessionStartMs=performance.now();
+let thinkingOffOK=store.get("thinkOff",true);
+function reqBody(msgs,stream){ const b={model:MODEL,max_tokens:thinkingOffOK?600:3000,system:(topic==="plant"?RULES_PLANT:RULES_ATOM)+"\nسطر الحالة: مدة الرحلة "+Math.max(0,Math.round((performance.now()-sessionStartMs)/60000))+" دقائق. المهمات التي انتهت: "+(coveredNames()||"لا شيء بعد")+". "+(history.length===0?"هذا ردك الأول بعد التحية: اكشفي السر الآن (جسمكِ وكل شيء حولكِ مصنوع من ذرات مثلي، حتى يدكِ التي تحركينها الآن!)، ثم اسأليها فقط: هل كنتِ تعرفين ذلك؟ ولا تذكري القلب بعد. ":history.length===1?"هذا ردك الثاني: تفاعلي مع جوابها، ثم قولي: وأنا عندي قلب صغير في وسطي... خمّني ما اسمه؟ ":"")+(covered.size>=3?"المهمات الثلاث انتهت: اسأليها هل لديها سؤال أم ننهي الرحلة.":covered.size===2?"بقيت مهمة واحدة.":"")+" لا تذكري النجوم أبداً.",messages:msgs}; if(stream) b.stream=true; if(thinkingOffOK) b.thinking={type:"disabled"}; return b; }
+let starBlocked=false;
+const STAR_PHRASE=new RegExp("[،,]?\\s*"+"ربحت".split("").join("[\\u064B-\\u0652]*")+"[\\u064B-\\u0652]*\\s*"+"نجمة".split("").join("[\\u064B-\\u0652]*")+"[\\u064B-\\u0652]*\\s*!?","g");
+function starAllowed(){
+  if(!history.length) return false;                       // أول رد = اسم الطالبة
+  const lastA=strip(history[history.length-1].a||"");
+  if(/قولي معي/.test(lastA)) return true;                   // تكرار الإجابة بعد المساعدة يُحتسب
+  if(!/[؟?]\s*$/.test(lastA)) return false;               // لا نجمة إن لم يكن آخر كلامها سؤالاً
+  const lastQ=lastA.split(/[.!،]/).pop();
+  if(/اسم|نطقت|صحيحا[؟?]|نبدأ|نبدا|تساعدين/.test(lastQ)) return false;  // سؤال الاسم أو التأكيد أو البدء لا يُحتسب
+  return true;
+}
+let starThisTurn=false; const starredMissions=new Set();
+const covered=new Set(); let assistantTurns=0, coverDoneTurn=-1;
+const MISSION_NAMES={r:"الجذور",sl:"الساق والأوراق",f:"الزهرة والبذور",n:"النواة",pn:"البروتونات والنيوترونات",e:"الإلكترونات"};
+function coveredNames(){ return [...covered].map(k=>MISSION_NAMES[k]).join("، "); }
+function partMission(p){ if(!p) return null; if(topic==="plant") return p==="root"?"r":(p==="stem"||p==="leaf")?"sl":"f"; return p==="nucleus"?"n":(p==="proton"||p==="neutron")?"pn":"e"; }
+const missionTurns={};
+const MISSION_WORDS={r:/جذر|جذور/g,sl:/ساق|ورق|أوراق|اوراق/g,f:/زهر|بذر|بذور|ثمر/g,n:/نوا[ةت]/g,pn:/بروتون|نيوترون/g,e:/[إا]لكترون|مستو[ىي]|مدار/g};
+function dominantMission(text){ const t=strip(text); const keys=topic==="plant"?["r","sl","f"]:["n","pn","e"]; let best=null,bc=0;
+  keys.forEach(k=>{ const c=(t.match(MISSION_WORDS[k])||[]).length; if(c>bc){ bc=c; best=k; } }); return best; }
+function countMissionTurn(text){ const m=dominantMission(text); if(!m) return; missionTurns[m]=(missionTurns[m]||0)+1;
+  if(missionTurns[m]>=2&&!covered.has(m)){ covered.add(m); coverAt[m]=clock.getElapsedTime(); log("covered: "+m+" ("+covered.size+"/3)"); if(covered.size>=3&&coverDoneTurn<0) coverDoneTurn=assistantTurns; } }
+function markCovered(p){ const m=partMission(p); if(!m||covered.has(m)) return; covered.add(m); log("covered: "+m+" ("+covered.size+"/3)"); coverAt[m]=clock.getElapsedTime();
+  if(covered.size>=3&&coverDoneTurn<0){ coverDoneTurn=assistantTurns; } }
+const coverAt={};
+function missionOf(text){ const p=partOf(text);
+  if(topic==="plant") return p==="root"?"r":(p==="stem"||p==="leaf")?"sl":(p==="flower"||p==="seed")?"f":"g";
+  return p==="nucleus"?"n":(p==="proton"||p==="neutron")?"pn":(p==="electron"||p==="orbit")?"e":"g"; }
+function awardStar(why){
+  return;
+  const lastA=history.length?history[history.length-1].a||"":""; const ms=missionOf(lastA);
+  if(ms!=="g" && starredMissions.has(ms)){ log("star skipped: mission already starred ("+ms+")"); starBlocked=true; return; }
+  if(ms!=="g") starredMissions.add(ms); starThisTurn=true;
+  stars++; starEarnedAt[stars-1]=clock.getElapsedTime(); happyUntil=clock.getElapsedTime()+(stars>=3?6:3); log("star: "+stars+" ("+why+")");
+  if(stars>=3){ surpriseAt=1e9; pendingCelebrate=true; }
+}
+function maybePraiseStar(text){ if(/^\s*(أحسنت|احسنت|رائع|ممتاز|برافو|صحيح)/.test(strip(text))) happyUntil=clock.getElapsedTime()+2.5; return; if(celebrating) return; if(!starThisTurn && /^\s*(أحسنت|احسنت|إجابة صحيحة|اجابة صحيحة|صحيح|برافو|ممتاز)/.test(strip(text)) && starAllowed()) awardStar("praise"); }
+const META_RE=/[A-Za-z]|سطر الحالة|رسالة من النظام|ملاحظة من النظام|النظام:|الوسم|تعليمات|المهمات الثلاث انتهت|ردك الأول|ردك الثاني/;
+function isMeta(t){ return META_RE.test(t||""); }
+let metaRetry=false;
+function handleTags(lead){
+  const tags=(lead.match(/\[\[([^\]]*)\]\]/g)||[]).map(x=>{ const v=x.slice(2,-2).trim(); return /^n:/i.test(v)?"N:"+v.slice(2):v.toUpperCase(); });
+  tags.forEach(tg=>{
+    if(/^\d{1,2}$/.test(tg)){ if(topic==="atom") buildElement(+tg); }
+    else if(tg==="END"){ if(!celebrating&&covered.size>=3){ celebrating=true; surpriseAt=clock.getElapsedTime()+0.6; happyUntil=clock.getElapsedTime()+5; sessionEnded=true; log("session: closing -> celebrate"); } else if(celebrating||/اريد ان انتهي|أريد أن أنتهي|ابغى اخلص|أبغى أخلص|مع السلامه|مع السلامة|انتهيت من الرحلة/.test(strip(lastStudentText))){ sessionEnded=true; log("session: end"); } else { log("END rejected -> redo answer"); rejectTurn=true; } }
+    else if(/^N:/.test(tg)){ studentName=tg.slice(2).trim().replace(/[\u064B-\u0652]/g,"").slice(0,20); log("name: "+studentName); }
+  });
+}
+async function answer(q){
+  q=q.trim(); if(!q) return;
+  if(!apiKey){ openKey(); return; }
+  stopSpeak(); const id=turnId; mode="thinking"; log("claude: asking");
+  const msgs=[]; history.slice(-8).filter(h=>h.q&&h.q.trim()&&h.a&&h.a.trim()).forEach(h=>{ msgs.push({role:"user",content:h.q}); msgs.push({role:"assistant",content:h.a}); });
+  msgs.push({role:"user",content:q}); if(!/^\(رسالة من النظام/.test(q)) lastStudentText=q;
+  if(aborter) aborter.abort(); aborter=new AbortController();
+  rejectTurn=false;
+  const player=createPlayer(id);
+
+  let first=null, full="", tagDone=false; starBlocked=false; starThisTurn=false;
+  try{
+    const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",signal:aborter.signal,
+      headers:{"content-type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+      body:JSON.stringify(reqBody(msgs,true))});
+    log("claude: status "+r.status);
+    if(!r.ok && r.status===400 && thinkingOffOK){ const dd=await r.clone().json().catch(()=>({})); const msg=(dd.error&&dd.error.message)||"";
+      if(/thinking/i.test(msg)){ log("thinking param rejected -> retry without it"); thinkingOffOK=false; store.set("thinkOff",false); mode="idle"; return answer(q); } }
+    if(!r.ok){ const data=await r.json().catch(()=>({})); log("claude error: "+((data.error&&data.error.message)||JSON.stringify(data)).slice(0,300)); mode="idle";
+      if(r.status===401) openKey(); say("",6000); return; }
+    const reader=r.body.getReader(), dec=new TextDecoder(); let stopNow=false; let buf="", evTypes={}, stopReason="", rawHead="";
+    while(true){
+      if(stopNow){ try{ reader.cancel(); }catch(e){} break; }
+      const {value,done}=await reader.read(); if(done) break;
+      buf+=dec.decode(value,{stream:true}); let k;
+      while((k=buf.indexOf("\n\n"))>=0){
+        const ev=buf.slice(0,k); buf=buf.slice(k+2);
+        const line=ev.split("\n").find(l=>l.startsWith("data:")); if(!line) continue;
+        if(rawHead.length<400) rawHead+=line.slice(0,200)+" | ";
+        try{ const d=JSON.parse(line.slice(5)); evTypes[d.type+(d.delta&&d.delta.type?":"+d.delta.type:"")]=(evTypes[d.type+(d.delta&&d.delta.type?":"+d.delta.type:"")]||0)+1;
+          if(d.type==="message_delta"&&d.delta&&d.delta.stop_reason) stopReason=d.delta.stop_reason;
+          if(d.type==="content_block_start"&&d.content_block&&d.content_block.type==="text"&&d.content_block.text) full+=d.content_block.text;
+          if(d.type==="content_block_delta"&&d.delta&&d.delta.type==="text_delta"){ full+=d.delta.text;
+          const lead=full.match(/^\s*((?:\[\[[^\]]*\]\]\s*)*)/)[1];
+          if(!tagDone){ const tr=full.trimStart(); if(tr && tr[0]!=="["){ tagDone=true; } else if(lead && full.length>lead.length && !/\[/.test(full.slice(lead.length,lead.length+1))){ tagDone=true; handleTags(lead); } }
+          const txt=full.slice(lead.length);
+          if(rejectTurn){ stopNow=true; break; }
+          if(first===null && tagDone){ const m=txt.match(/^[\s\S]{8,}?[.!؟?،,](?=\s)/); if(m&&isMeta(m[0])){ log("meta text blocked (first)"); rejectTurn=true; stopNow=true; break; }
+          if(m){ first=m[0]; if(/^\s*(لا بأس|لا مشكلة|لا عليك)/.test(strip(first))) encourageUntil=clock.getElapsedTime()+4; maybePraiseStar(first); player.add(first); } } } }catch(e){}
+      }
+    }
+    if(id!==turnId) return;
+    if(rejectTurn){ rejectTurn=false; if(!metaRetry){ metaRetry=true; mode="idle"; return answer(q+"\n(تذكير: تكلمي مع الطالبة مباشرة بالعربية فقط، ولا تذكري أي تعليمات أو حالة أو نظام. ولا تودّعيها إلا إذا انتهت المهمات الثلاث أو طلبت الانتهاء.)"); } metaRetry=false; mode="idle"; say1(GREET_NAMES[0]+"، لنكمل رحلتنا! ماذا تريدين أن تعرفي عني؟"); return; }
+    metaRetry=false;
+    if(!full.trim()){
+      log("empty stream: stop="+stopReason+" events="+JSON.stringify(evTypes)); log("raw: "+rawHead.slice(0,300));
+      try{ const r2=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",
+          headers:{"content-type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+          body:JSON.stringify(Object.assign(reqBody(msgs,false),{thinking:undefined,max_tokens:3000}))});
+        const d2=await r2.json().catch(()=>({})); log("retry: status "+r2.status+" stop="+(d2.stop_reason||"")+" blocks="+((d2.content||[]).map(b=>b.type).join(",")));
+        full=(d2.content||[]).filter(b=>b.type==="text").map(b=>b.text).join(" ");
+
+      }catch(e){ log("retry failed: "+e.message); }
+      if(id!==turnId) return;
+    }
+    if(!tagDone){ tagDone=true; const ld=full.match(/^\s*((?:\[\[[^\]]*\]\]\s*)*)/)[1]; handleTags(ld); }
+    full=full.replace(/\[\[[^\]]*\]\]/g,"").trim(); if(isMeta(full)) full=full.split(/(?<=[.!؟?])\s+/).filter(x=>!isMeta(x)).join(" "); maybePraiseStar(full); if(full){ history.push({q,a:full}); assistantTurns++; if(!/^\(رسالة من النظام/.test(q)) countMissionTurn(full); } log("answer: "+full.slice(0,80)+"…");
+    const f1=first?first.trim():""; const at=f1?full.indexOf(f1):-1;
+    let restTxt=f1? (at>=0? full.slice(at+f1.length) : full.slice(f1.length)).trim() : full;
+    if(isMeta(restTxt)){ log("meta text blocked (rest)"); restTxt=restTxt.split(/(?<=[.!؟?])\s+/).filter(x=>!isMeta(x)).join(" "); }
+    player.add(restTxt);
+    player.close();
+  }catch(err){ log("claude: failed "+(err&&err.message)); if(id===turnId){ mode="idle"; if(!err||err.name!=="AbortError") say("",6000); } }
+}
+
+/* ---------- الاستماع ---------- */
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+let rec=null, active=false, paused=false, heardBuf="", sendT=null;
+const SILENCE_MS=1900;
+let interimText="";
+function flushHeard(){ const q=(heardBuf+" "+interimText).trim(); heardBuf=""; interimText=""; if(q) silenceStage=0;
+  if(q && sessionEnded){ return; }
+  if(q && canAzureSTT() && mode!=="speaking" && mode!=="thinking"){ paused=false; }
+  if(q && rec && !canAzureSTT()){ try{ rec.abort(); }catch(e){} } if(mode==="speaking"){ if(q) log("dropped (speaking): "+q); return; } if(q){ log("heard final: "+q); onStudent(q); } else if(mode==="hearing") mode="idle"; }
+/* ---- Azure STT (أدق من Chrome) ---- */
+let az=null, azRunning=false, azSessionStart=0;
+let azToken=null, azTokRegion="", azTokAt=0;
+async function fetchAzToken(){ try{ const r=await fetch("/.netlify/functions/stt-token",{headers:srvHeaders()}); if(r.status===401){ if(await askAccess()) return fetchAzToken(); return false; } const d=await r.json(); if(d.token){ azToken=d.token; azTokRegion=d.region; azTokAt=performance.now(); log("stt token: ok"); return true; } }catch(e){ log("stt token failed: "+e.message); } return false; }
+const canAzureSTT=()=>!!(((azKey&&azRegion)||(SERVER&&azToken))&&window.SpeechSDK);
+setInterval(async()=>{ if(SERVER&&!azKey&&azToken&&performance.now()-azTokAt>8*60000){ await fetchAzToken(); if(az) az.authorizationToken=azToken; } },60000);
+function overlapsSpeech(e){
+  const now=performance.now(), dur=(e.result.duration||0)/10000, end=now-750, start=end-dur;
+  if(mode==="speaking") return true;
+  return speakWins.some(([a,b])=>start<b+250&&end>a);
+}
+function inSpeakWin(tAbs){ if(mode==="speaking") return true; return speakWins.some(([a,b])=>tAbs>=a-100&&tAbs<=b+500); }
+function startAzureSTT(){
+  if(az) return;
+  const sdk=window.SpeechSDK;
+  try{
+    const cfg=(azKey&&azRegion)?sdk.SpeechConfig.fromSubscription(azKey,azRegion):sdk.SpeechConfig.fromAuthorizationToken(azToken,azTokRegion);
+    cfg.speechRecognitionLanguage="ar-SA";
+    cfg.setProperty(sdk.PropertyId.Speech_SegmentationSilenceTimeoutMs,"800");
+    az=new sdk.SpeechRecognizer(cfg,sdk.AudioConfig.fromDefaultMicrophoneInput());
+    az.sessionStarted=()=>{ azSessionStart=performance.now(); log("azure stt: session started"); };
+    az.recognizing=(x,e)=>{ if(mode==="speaking"||mode==="thinking") return;
+      interimText=e.result.text||""; lastHeardMs=performance.now(); if(mode==="idle") mode="hearing"; clearTimeout(sendT); sendT=setTimeout(flushHeard,2200); silenceStage=0; };
+    az.recognized=(x,e)=>{
+      if(e.result.reason!==sdk.ResultReason.RecognizedSpeech) return;
+      const tAbs=azSessionStart+e.result.offset/10000; const txt=(e.result.text||"").trim();
+      if(!txt) return;
+      if(overlapsSpeech(e)){ log("azure stt: ignored (own voice): "+txt.slice(0,40)); return; }
+      heardBuf+=txt+" "; interimText=""; log("heard: "+txt); mode="hearing"; clearTimeout(sendT); sendT=setTimeout(flushHeard,350); silenceStage=0;
+    };
+    az.canceled=(x,e)=>{ log("azure stt canceled: "+(e.errorDetails||e.reason)); azRunning=false; try{az.close();}catch(_){} az=null; if(active) setTimeout(()=>{ if(active&&!az) startAzureSTT(); },400); };
+    az.sessionStopped=()=>{ log("azure stt: session stopped -> restart"); azRunning=false; try{az.close();}catch(_){} az=null; if(active) setTimeout(()=>{ if(active&&!az) startAzureSTT(); },150); };
+    const me=az; az.startContinuousRecognitionAsync(()=>{ if(az===me){ azRunning=true; log("azure stt: listening"); } },err=>{ log("azure stt start failed: "+err); azRunning=false; az=null; });
+  }catch(e){ log("azure stt error: "+e.message); az=null; }
+}
+function stopAzureSTT(){ if(az){ const a=az; az=null; azRunning=false; try{ a.stopContinuousRecognitionAsync(()=>a.close(),()=>a.close()); }catch(e){} } }
+function pauseRec(){ if(canAzureSTT()){ paused=true; log("listen: paused while speaking (azure keeps mic, filters own voice)"); return; } paused=true; if(rec){ try{ rec.abort(); }catch(e){} } log("listen: paused while speaking"); }
+function resumeRec(){ if(!paused) return; if(canAzureSTT()){ paused=false; if(active&&!az) startAzureSTT(); return; } setTimeout(()=>{ paused=false; if(active&&!rec) startListening(); log("listen: resumed"); },250); }
+function startListening(){
+  if(canAzureSTT()){ active=true; startAzureSTT(); return; }
+  if(!SR){ say("",0); log("no SpeechRecognition (use Chrome)"); return; }
+  if(rec||paused) return;
+  log("listen: start"); active=true; rec=new SR(); rec.lang="ar-SA"; rec.continuous=true; rec.interimResults=true;
+  rec.onaudiostart=()=>log("mic: audio started");
+  rec.onspeechstart=()=>{ log("mic: speech detected"); silenceStage=0; if(mode==="idle"&&performance.now()-speakEnd>450) mode="hearing"; };
+  rec.onresult=(e)=>{
+    if(paused||mode==="speaking"||mode==="thinking"||performance.now()-speakEnd<450){ heardBuf=""; return; }
+    let fin="", interim=false, itext="";
+    for(let i=e.resultIndex;i<e.results.length;i++){ if(e.results[i].isFinal) fin+=e.results[i][0].transcript+" "; else { interim=true; itext+=e.results[i][0].transcript; } }
+    interimText=itext;
+    if(fin.trim()){ heardBuf+=fin; interimText=""; log("heard: "+fin); }
+    if(interim||fin.trim()){ mode="hearing"; clearTimeout(sendT); sendT=setTimeout(flushHeard, SILENCE_MS); }
+  };
+  rec.onspeechend=()=>{ clearTimeout(sendT); sendT=setTimeout(flushHeard, SILENCE_MS); };
+  rec.onerror=(e)=>{ log("mic error: "+e.error);
+    if(e.error==="not-allowed"||e.error==="service-not-allowed"||e.error==="audio-capture"){ active=false; say("",0); }
+    else if(e.error==="network") say("",5000); };
+  rec.onend=()=>{ log("listen: ended"); rec=null; if(mode==="hearing") mode="idle"; if(active&&!paused) setTimeout(startListening,120); };
+  try{ rec.start(); }catch(e){ log("listen start failed: "+e.message); rec=null; }
+}
+/* ================== الرحلة المكتوبة (نص ثابت) ================== */
+const ADDR=["يا جميلتي","يا حلوة","يا بطلة","يا صديقتي"];
+const PRAISE_W=["رائع!","أحسنتِ!","ممتاز!","برافو عليكِ!","إجابة ذكية!"];
+const pick=a=>a[Math.floor(Math.random()*a.length)];
+const norm=t=>strip(t||"").replace(/[إأآا]/g,"ا").replace(/ى/g,"ي").replace(/ة/g,"ه").replace(/[^\u0621-\u064A0-9\s]/g," ").replace(/\s+/g," ").trim();
+const SOCIAL=/احبك|شكرا|مشكوره|انتي حلوه|انت حلوه|جميله|اموت فيك|عسل|كيفك|كيف حالك|شخبارك|اسمك|كم عمرك/;
+const DONTKNOW=/لا اعرف|ما اعرف|مدري|ما ادري|لا ادري|ماعرف|ما عرفت|صعب|نسيت|ما اذكر|ما اتذكر|لا اتذكر/;
+const NUMJ={"واحد":1,"اثنين":2,"اثنان":2,"ثلاث":3,"ثلاثه":3,"اربع":4,"اربعه":4,"خمس":5,"خمسه":5,"ست":6,"سته":6,"سبع":7,"سبعه":7,"ثمان":8,"ثمانيه":8};
+function numIn(t){ const n=norm(t); const d=n.match(/\d+/); if(d) return +d[0]; for(const w of n.split(" ")){ if(NUMJ[w]!=null) return NUMJ[w]; } return null; }
+
+// كل خطوة: ما تقوله، وما يُبرَز، وما تتوقعه، والتلميحات بالتدرج
+// "قولي معي" فقط مع: الذرة، النواة، الإلكترونات
+function buildSteps(){
+  return [
+    {id:"greet", say:()=>`مرحبا ${pick(ADDR)}! أنا الذرة. عندي سر عجيب، عنكِ أنتِ! هل تريدين أن تعرفيه؟`, any:true},
+    {id:"secret", say:()=>"سري هو: جسمكِ وكل شيء حولكِ مصنوع من ذرات مثلي، حتى يدكِ التي تحركينها الآن! وأنا اسمي الذرة. ما اسمي؟",
+      expect:/ذر/, q:"ما اسم الشخصية التي تتكلم؟", ans:"الذرة",
+      ok:()=>"نعم! أنا الذرة! قولي معي: الذرة!",
+      ladder:[()=>"اسمي الذرة! قولي معي: الذرة!"]},
+    {id:"heart", focus:"nucleus", say:()=>"وأنا الذرة عندي قلب صغير في وسطي، خمّني ما اسم قلبي؟",
+      expect:/نوا|نواه|نوات/, q:"ما اسم قلب الذرة الذي في وسطها؟", ans:"النواة",
+      ok:()=>"نعم! قلبي اسمه النواة! انظري إليها هنا في وسطي، قولي معي: النواة!",
+      ladder:[()=>"تخمين جميل! اسم قلبي مثل الشيء الصغير الذي في وسط حبة التمر! ما اسم قلبي؟",()=>"هل اسم قلبي النواة أم الإلكترون؟",()=>"اسم قلبي النواة! قولي معي: النواة!"]},
+    {id:"where", focus:"nucleus", say:()=>"هذه هي النواة! النواة في وسطي تماما، مثل نواة التمرة. أين توجد النواة؟",
+      expect:/وسط|مركز|منتصف|نص/, q:"أين توجد النواة في الذرة؟", ans:"في الوسط",
+      ladder:[()=>"انظري إليّ، هل النواة على أطرافي أم في وسطي؟",()=>"النواة في وسطي تماما!"]},
+    {id:"count", focus:"proton", count:"proton",
+      say:()=>"بقيت لنا مهمتان! داخل النواة، قلبي، حبات صغيرة اسمها البروتونات. انظري إليها وهي تضيء واحدة واحدة، وعدّيها بصوت عال.",
+      ask:()=>"كم بروتونا عندي؟",
+      expectNum:()=>protons.length, q:"كم بروتوناً مضيئاً؟", ans:()=>String(protons.length),
+      ladder:[()=>"قريبة! هيا نعدّها مرة أخرى ببطء.",()=>`عندي ${protons.length} بروتونات!`], recount:true},
+    {id:"charge", focus:"proton", say:()=>"البروتونات شحنتها موجبة. ما شحنة البروتونات؟",
+      expect:/موجب|زايد|زائد|\+/, q:"ما شحنة البروتونات؟", ans:"موجبة",
+      ladder:[()=>"فكرة جميلة! انظري إلى العلامة على البروتون، إنها زائد. ماذا تعني؟",()=>"هل شحنتها موجبة أم سالبة؟",()=>"شحنتها موجبة!"]},
+    {id:"ncount", focus:"neutron", count:"neutron",
+      say:()=>"وداخل النواة أيضا حبات أخرى اسمها النيوترونات، وهي متعادلة، ليس لها شحنة. انظري إليها وهي تضيء واحدة واحدة، وعدّيها بصوت عال.",
+      ask:()=>"كم نيوترونا عندي؟",
+      expectNum:()=>neutrons.length, q:"كم نيوتروناً مضيئاً؟", ans:()=>String(neutrons.length),
+      ladder:[()=>"قريبة! هيا نعدّها مرة أخرى ببطء.",()=>`عندي ${neutrons.length} نيوترونات!`], recount:true},
+    {id:"inside", focus:"nucleus", say:()=>"إذن داخل النواة نوعان من الحبات: البروتونات الموجبة، والنيوترونات المتعادلة. ماذا يوجد داخل النواة؟",
+      expectBoth:[/بروتون/,/نيوترون|نترون|نيترون/], expect:/بروتون.*(نيوترون|نترون|نيترون)|(نيوترون|نترون|نيترون).*بروتون/, q:"ماذا يوجد داخل النواة؟", ans:"البروتونات والنيوترونات",
+      partial:()=>"صحيح! ومعها نوع آخر من الحبات، ما هو؟",
+      partialEnd:()=>"قريبة! داخل النواة النوعان معا: البروتونات والنيوترونات!",
+      ladder:[()=>"قريبة! انظري داخل النواة، ما اسم الحبات الموجبة، والحبات المتعادلة؟",()=>"هل داخل النواة البروتونات والنيوترونات، أم الإلكترونات؟",()=>"داخل النواة البروتونات والنيوترونات!"]},
+    {id:"elements", focus:"proton",
+      say:()=>"هل تعلمين؟ عدد البروتونات يختلف من ذرة لأخرى! أنا ذرة كربون، أعيش في الخشب وقلم الرصاص، ولي 6 بروتونات.",
+      say2:()=>"أما ذرة الأكسجين في الهواء الذي نتنفسه، فلها 8 بروتونات، انظري! أي ذرة لها بروتونات أكثر: الكربون أم الأكسجين؟", element:8,
+      expect:/[اأ]كسج|اكسيج|ثمان|8/, q:"أي ذرة لها بروتونات أكثر: الكربون (6) أم الأكسجين (8)؟", ans:"الأكسجين",
+      ladder:[()=>"تذكري: الكربون له 6 بروتونات، والأكسجين له 8. أيهما أكثر؟",()=>"الأكسجين له 8 بروتونات، أكثر من الكربون!"]},
+    {id:"electrons", focus:"electron", say:()=>"بقيت لنا مهمة أخيرة! حول النواة حبات تدور بسرعة اسمها الإلكترونات، وشحنتها سالبة. أين تدور الإلكترونات؟",
+      expect:/حول|خارج|مدار|مستوي|دوائر|برا|بره|تدور/, q:"أين تدور الإلكترونات؟", ans:"حول النواة",
+      ok:()=>"نعم! تدور حول النواة. واسمها الإلكترونات، قولي معي: الإلكترونات!",
+      ladder:[()=>"انظري جيدا، هل تدور داخل قلبي أم حوله؟",()=>"تدور حول قلبي! واسمها الإلكترونات، قولي معي: الإلكترونات!"]},
+    {id:"levels", focus:"orbit", say:()=>"والدوائر التي تدور فيها الإلكترونات اسمها مستويات الطاقة. هذه دوائري المضيئة!", auto:true},
+    {id:"attract", focus:"electron", say:()=>"النواة موجبة، والإلكترونات سالبة، والموجب يجذب السالب، لذلك تبقى قريبة مني ولا تهرب! هل الموجب والسالب يتجاذبان أم يتنافران؟",
+      expect:/تجاذب|يتجاذب|يجذب|جذب|تجذب/, q:"هل الشحنة الموجبة والسالبة يتجاذبان أم يتنافران؟", ans:"يتجاذبان",
+      ladder:[()=>"تذكري: لذلك تبقى الإلكترونات قريبة مني ولا تهرب، هل يتجاذبان أم يتنافران؟",()=>"يتجاذبان!"], last:true},
+    {id:"facts", focus:"nucleus", say:()=>"هل تعلمين؟ لو كبرت بحجم ملعب كرة، لكانت نواتي بحجم حبة حمص في وسطه! وأغلب وزني في قلبي الصغير، أما الإلكترونات فخفيفة جدا!", auto:true},
+    {id:"surprise", say:()=>`مفاجأة! أنتِ الآن عالمة الذرة الصغيرة! تعالي نثبت ذلك! تحدي العالمة: ما اسم قلبي؟`, surprise:true,
+      expect:/نوا/, q:"ما اسم قلب الذرة؟", ans:"النواة", soft:()=>"قريبة! تذكري، اسم قلبي النواة! قولي معي: النواة!"},
+    {id:"recap2", focus:"electron", say:()=>"ومن يدور حولي؟", expect:/[اإ]لكترون|الكترون/, q:"من يدور حول نواة الذرة؟", ans:"الإلكترونات", soft:()=>"قريبة! تذكري، تدور حولي الإلكترونات! قولي معي: الإلكترونات!"},
+    {id:"closing", say:()=>"أنتِ عالمة حقيقية! هل لديكِ سؤال عني، أم أودّعكِ؟", closing:true},
+    {id:"bye", say:()=>`أنا الذرة، وسأبقى معكِ في كل شيء حولكِ! إلى اللقاء ${pick(ADDR)}!`, bye:true}
+  ];
+}
+
+const J={steps:[],i:0,tries:0,qCount:0,waitRepeat:false,missionsDoneAt:0,busy:false,got:new Set(),partials:0};
+function speakNow(text){ lastSpokenText=text; return new Promise(res=>{ say1(text); speechDoneCb=res; }); }
+let speechDoneCb=null;
+function setFocusNow(p){ pendingFocus=p; focusSince=-10; }
+async function runStep(){
+  const st=J.steps[J.i]; if(!st) return;
+  J.tries=0; J.waitRepeat=false; J.got=new Set(); J.partials=0; J.pending=null; countType=null; pendingCount=null;
+  if(st.focus) setFocusNow(st.focus); else if(!st.surprise) setFocusNow(null);
+  if(Z!==DEFAULT_Z&&!st.element) buildElement(DEFAULT_Z);
+  if(st.surprise){ celebrating=true; surpriseAt=clock.getElapsedTime()+0.4; happyUntil=clock.getElapsedTime()+5; }
+  if(st.bye){ sessionEnded=true; waveUntil=clock.getElapsedTime()+6; }
+  [J.steps[J.i+1],J.steps[J.i+2]].forEach(n=>{ if(n) speechParts(n.say()).forEach(prefetch); });
+  await speakNow(st.say());
+  if(st.count){ await doCount(st); }
+  if(st.element){ buildElement(st.element); setFocusNow(st.focus); await new Promise(z=>setTimeout(z,1200)); await speakNow(st.say2()); }
+  if(st.bye){ endingAt=clock.getElapsedTime()+2.5; }
+  if(st.auto){ await nextStep(); }
+}
+async function nextStep(prefix){
+  J.i++; const st=J.steps[J.i];
+  if(st&&st.last===undefined&&J.steps[J.i-1]&&J.steps[J.i-1].last) J.missionsDoneAt=performance.now();
+  // بعد 5 دقائق والمهمات منتهية: مباشرة إلى المفاجأة
+  if(st&&st.id==="facts"&&(performance.now()-sessionStartMs)/60000>5){ J.i++; }
+  if(prefix){ await speakNow(prefix); }
+  await runStep();
+}
+// تقييم الإجابة: محلياً أولاً، ثم Claude عند الحاجة
+async function claudeCall(body){
+  if(apiKey){ const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"content-type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify(body)}); return r.json(); }
+  let r=await fetch("/.netlify/functions/claude",{method:"POST",headers:srvHeaders(),body:JSON.stringify(body)});
+  if(r.status===401&&await askAccess()) r=await fetch("/.netlify/functions/claude",{method:"POST",headers:srvHeaders(),body:JSON.stringify(body)});
+  return r.json();
+}
+async function judge(st,text){
+  const n=norm(text);
+  if(DONTKNOW.test(n)) return "dontknow";
+  if(st.expectNum){ const k=numIn(text); if(k!=null) return k===st.expectNum()?"correct":"wrong"; }
+  if(st.expect&&st.expect.test(n)) return "correct";
+  if(st.expectBoth){ st.expectBoth.forEach((r,i)=>{ if(r.test(n)) J.got.add(i); }); if(J.got.size>=st.expectBoth.length) return "correct"; if(J.got.size>0) return "partial"; }
+  if(DONTKNOW.test(n)) return "dontknow";
+  if(!apiKey&&!SERVER) return "wrong";
+  try{
+    const d=await claudeCall({model:MODEL,max_tokens:120,thinking:thinkingOffOK?{type:"disabled"}:undefined,system:"أنت مقيّم إجابات لطالبة صغيرة تتحدث مع مجسّم ذرة. أعد JSON فقط بلا أي نص آخر، بالشكل: {\"v\":\"correct|wrong|dontknow|question|unclear|end\"}. correct إذا كان المعنى صحيحاً ولو بكلمات مختلفة. question إذا كانت تسأل سؤالاً. unclear إذا كان الكلام غير مفهوم أو لا علاقة له. end إذا طلبت إنهاء المحادثة بوضوح. وإذا كان كلاماً ودياً (مثل أحبك أو شكراً) فاعتبريه question.",
+        messages:[{role:"user",content:`السؤال: ${st.q}\nالإجابة الصحيحة: ${typeof st.ans==="function"?st.ans():st.ans}\nكلام الطالبة: ${text}`}]}); const t=(d.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("");
+    const m=t.match(/"v"\s*:\s*"(\w+)"/); log("judge: "+(m?m[1]:"?")); return m?m[1]:"unclear";
+  }catch(e){ log("judge failed: "+e.message); return "unclear"; }
+}
+async function shortAnswer(question){
+  try{
+    const d=await claudeCall({model:MODEL,max_tokens:150,thinking:thinkingOffOK?{type:"disabled"}:undefined,system:"أنتِ الذرة، شخصية لطيفة تتحدث عن نفسها مع طالبة في الصف الخامس أو السادس. أجيبي سؤالها بجملة واحدة قصيرة جداً (لا تتجاوز 20 كلمة)، بعربية فصحى سهلة، بصيغة المتكلم، وخاطبيها بالمؤنث، ودقيقة علمياً، بلا تشكيل ولا رموز ولا إنجليزية. إن قالت كلاماً لطيفاً مثل أحبكِ أو شكراً، فردي بمحبة ودفء، مثل: وأنا أحبكِ أيضاً يا صديقتي! وإن سألت عن اسمك فأنتِ الذرة، وإن سألت عن عمرك فقولي إن الذرات موجودة منذ زمن طويل جداً. إن كان السؤال خارج موضوع الذرة فقولي بلطف إنك تتحدثين عن نفسك فقط.",
+        messages:[{role:"user",content:question}]}); let t=(d.content||[]).filter(b=>b.type==="text").map(b=>b.text).join(" ").trim();
+    if(!t||isMeta(t)) t="سؤال رائع! سنكتشفه معا في رحلة أخرى."; return t;
+  }catch(e){ return "سؤال رائع! سنكتشفه معا في رحلة أخرى."; }
+}
+let lastSpokenText="";
+function similarToOwn(text){
+  const a=norm(text).split(" ").filter(w=>w.length>1); if(!a.length) return false;
+  const own=norm(lastSpokenText).split(" "); const hit=a.filter(w=>own.includes(w)).length;
+  const r=hit/a.length, dt=performance.now()-speakEnd;
+  return (a.length>=3&&r>=0.6&&dt<4000) || (r>=0.8&&dt<1200);   // الإجابات القصيرة لا تُعدّ صدى إلا إذا جاءت فور انتهاء كلامها
+}
+async function onStudent(text){
+  if(J.busy){ J.pending=text; log("queued (busy): "+text); return; } const st=J.steps[J.i]; if(!st||sessionEnded&&!st.bye) return;
+  if(sessionEnded&&!st.bye){ log("dropped (session ended): "+text); return; }
+  if(similarToOwn(text)&&!(st.expect&&st.expect.test(norm(text)))&&!J.waitRepeat&&!st.repeatOnly&&!/قولي معي/.test(lastSpokenText)){ log("ignored echo: "+text); return; }
+  J.busy=true; mode="thinking"; log("student: "+text);
+  try{
+    if(st.any){ await nextStep(); return; }
+    if(st.repeatOnly){ happyUntil=clock.getElapsedTime()+2.5; await nextStep(pick(PRAISE_W)); return; }
+    if(st.id==="secret"&&/^(نعم|ايوه|ايوا|اي|اوكي|صح|طيب)$/.test(norm(text))){ await speakNow("إذن قولي لي: ما اسمي؟"); return; }
+    if(J.waitRepeat){ J.waitRepeat=false; happyUntil=clock.getElapsedTime()+2.5; await nextStep(pick(PRAISE_W)); return; }
+    if(SOCIAL.test(norm(text))&&!J.waitRepeat){ const a=await shortAnswer(text); await speakNow(a); if(!st.closing&&!st.any) await speakNow("سؤالي كان: "+(st.ask?st.ask():st.say().split(/[.!]\s/).pop())); else if(st.closing) await speakNow("هل لديكِ سؤال آخر، أم أودّعكِ؟"); return; }
+    if(st.closing){
+      const n=norm(text);
+      const W2=n.split(" "); const ENDW=["لا","ننهي","نهي","خلاص","يكفي","بس","انتهيت","ودعيني","باي","سلامه","السلامه","شكرا"];
+      if(W2.some(w=>ENDW.includes(w))&&!/[؟?]/.test(text)&&W2.length<=4){ await nextStep(); return; }
+      const v=/[؟?]|ليش|لماذا|كيف|ماذا|ما |هل |وش|ايش|متى|كم/.test(n)?"question":await judge({q:"هل لديك سؤال أم ننهي الرحلة؟",ans:"سؤال أو إنهاء"},text);
+      if(v==="question"&&J.qCount<4){ J.qCount++; const a=await shortAnswer(text); await speakNow(a+" هل لديكِ سؤال آخر، أم أودّعكِ؟"); return; }
+      await nextStep(); return;
+    }
+    const CONF=/^(ايش|ايه|وش|شو|ماذا|ها|هاه|عيدي|اعيدي|ما فهمت|مافهمت|كيف|نعم|ايش تقولين|وش تقولين)$/;
+    if(CONF.test(norm(text))&&!st.closing){ await speakNow("سؤالي هو: "+(st.ask?st.ask():st.say().split(/[.!]\s/).pop())); return; }
+    const v=await judge(st,text);
+    if(st.surprise||st.id==="recap2"){ if(v==="correct"){ happyUntil=clock.getElapsedTime()+2.5; await nextStep(pick(PRAISE_W)); } else { encourageUntil=clock.getElapsedTime()+3; await speakNow(st.soft()); J.waitRepeat=true; } return; }
+    if(v==="correct"){
+      happyUntil=clock.getElapsedTime()+2.5;
+      if(st.ok){ await speakNow(st.ok()); J.waitRepeat=true; return; }
+      await nextStep(pick(PRAISE_W)); return;
+    }
+    if(v==="partial"&&st.partial){ J.partials=(J.partials||0)+1;
+      if(J.partials>=2){ await nextStep(st.partialEnd?st.partialEnd():"لا بأس!"); return; }
+      happyUntil=clock.getElapsedTime()+1.5; await speakNow(st.partial()); return; }
+    if(v==="unclear"){ await speakNow(`لم أسمعكِ جيدا ${pick(ADDR)}، هل تعيدين؟`); return; }
+    if(v==="question"){ const a=await shortAnswer(text); await speakNow(a); await speakNow("سؤالي كان: "+(st.ask?st.ask():st.say().split(/[.!]\s/).pop())); return; }
+    if(v==="end"){ J.i=J.steps.findIndex(x=>x.surprise)-1; await nextStep(); return; }
+    // خطأ أو لا أعرف: تدرّج في المساعدة
+    encourageUntil=clock.getElapsedTime()+3;
+    const L=st.ladder||[]; const k=J.tries++;
+    if(k<L.length){ const line=L[k](); await speakNow(line);
+      if(/قولي معي/.test(line)){ J.waitRepeat=true; return; }
+      if(st.recount&&k===0){ await doCount(st); return; }
+      if(k===L.length-1){ await nextStep(); }
+      return; }
+    await nextStep(pick(["لا بأس!","هيا نكمل!"]));
+  } finally { J.busy=false; if(mode==="thinking") mode="idle";
+    if(J.pending){ const p=J.pending; J.pending=null; setTimeout(()=>onStudent(p),150); } }
+}
+const COUNT_DT=1.3;
+async function doCount(st){
+  const n=st.count==="neutron"?neutrons.length:protons.length;
+  setFocusNow(st.focus); await new Promise(z=>setTimeout(z,500));
+  countType=st.count; countN=n; countStart=clock.getElapsedTime(); pendingCount=null;
+  await new Promise(z=>setTimeout(z,(n*COUNT_DT+0.8)*1000));
+  await speakNow(st.ask());
+}
+function journeyStart(){ startMicMonitor(); J.steps=buildSteps(); J.steps.forEach(st=>{ const f=st.say; const t=f(); st.say=()=>t; }); J.i=0; J.tries=0; J.qCount=0; J.waitRepeat=false; J.busy=false; runStep(); }
+// الصمت: بعد 5 ثوان طمأنة، وبعد 15 ثانية تلميح (كأنها قالت لا أعرف)
+function journeySilence(stage){
+  const st=J.steps[J.i]; if(!st||st.any||st.bye||J.busy) return;
+  if(stage===1) say1("خذي وقتكِ، أنا أنتظركِ!");
+  else if(stage===2&&!st.closing) onStudent("لا أعرف");
+}
+
+// تنبيه عند صمت الطالبة
+let silenceStage=0, lastHeardMs=0, lastVoiceMs=0, micMon=null;
+async function startMicMonitor(){
+  if(micMon) return;
+  try{ const stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}});
+    initAudio(); const src=audioCtx.createMediaStreamSource(stream); const an=audioCtx.createAnalyser(); an.fftSize=1024; src.connect(an);
+    const buf=new Uint8Array(an.fftSize); micMon={an,buf};
+    setInterval(()=>{ an.getByteTimeDomainData(buf); let s2=0; for(let i=0;i<buf.length;i++){ const v=(buf[i]-128)/128; s2+=v*v; }
+      const rms=Math.sqrt(s2/buf.length); if(rms>0.04&&mode!=="speaking") lastVoiceMs=performance.now(); },100);
+    log("mic monitor: on"); }catch(e){ log("mic monitor failed: "+e.message); }
+}
+setInterval(()=>{
+  if(!started||sessionEnded||mode!=="idle"||J.busy) return;
+  const st=J.steps[J.i]; if(!st||st.any||st.bye) return;
+  const silent=(performance.now()-Math.max(speakEnd,lastHeardMs,lastVoiceMs))/1000;
+  if(silenceStage===0&&silent>7){ silenceStage=1; log("silence: wait"); journeySilence(1); }
+  else if(silenceStage===1&&silent>10){ silenceStage=0; log("silence: hint"); journeySilence(2); }
+},1000);
+// حارس: يعيد تشغيل الاستماع إن توقف دون سبب
+let idleSince=0;
+setInterval(()=>{
+  if(!started||!active) return;
+  if(mode==="idle"){ if(!idleSince) idleSince=performance.now(); } else idleSince=0;
+  if(paused && mode==="idle" && !curAudio && idleSince && performance.now()-idleSince>4000){ log("watchdog: unpause"); paused=false; }
+  if(canAzureSTT()){ if(!az){ log("watchdog: restart azure stt"); startAzureSTT(); } return; }
+  if(!paused && !rec && mode!=="speaking" && mode!=="thinking"){ log("watchdog: restart listening"); startListening(); }
+},3000);
+function stopListening(){ active=false; stopAzureSTT(); if(rec){ try{rec.abort();}catch(e){} rec=null; } micState("off"); }
+function toggleListen(){ if(active) stopListening(); else { startListening(); micState("on"); } showMic(); }
+
+/* ---------- المفاتيح والبدء ---------- */
+function openKey(){ document.body.style.cursor="auto"; $("keybox").classList.add("open"); setTimeout(()=>$("key").focus(),30); }
+$("save").addEventListener("click",()=>{ const v=$("key").value.trim(); if(!v) return; apiKey=v; store.set("key",v); $("key").value="";
+  $("keybox").classList.remove("open"); log("claude key saved"); if(started) showMic(); else document.body.style.cursor="none"; });
+$("key").addEventListener("keydown",e=>{ e.stopPropagation(); if(e.key==="Enter") $("save").click(); });
+function openAz(){ document.body.style.cursor="auto"; $("azKey").value=azKey; $("azRegion").value=azRegion; $("azVoice").value=azVoice; $("azbox").classList.add("open"); setTimeout(()=>$("azKey").focus(),30); }
+$("azSave").addEventListener("click",()=>{ azKey=$("azKey").value.trim(); azRegion=$("azRegion").value.trim().toLowerCase().replace(/\s+/g,""); azVoice=$("azVoice").value;
+  store.set("azKey",azKey); store.set("azRegion",azRegion); store.set("azVoice",azVoice);
+  log("azure saved: key="+(azKey?"set":"EMPTY")+" region="+(azRegion||"EMPTY")); $("azbox").classList.remove("open"); if(started) showMic(); else document.body.style.cursor="none"; });
+["azKey","azRegion","azVoice"].forEach(id=>$(id).addEventListener("keydown",e=>{ e.stopPropagation(); if(e.key==="Enter") $("azSave").click(); }));
+
+function openEl(){ document.body.style.cursor="auto"; $("elKey").value=elKey; $("elVoice").value=elVoice; $("elModel").value=elModel; $("elbox").classList.add("open"); setTimeout(()=>$("elKey").focus(),30); }
+$("elSave").addEventListener("click",()=>{ elKey=$("elKey").value.trim(); elVoice=$("elVoice").value.trim(); elModel=$("elModel").value;
+  store.set("elKey",elKey); store.set("elVoice",elVoice); store.set("elModel",elModel);
+  log("eleven saved: key="+(elKey?"set":"EMPTY")+" voice="+(elVoice||"EMPTY")+" model="+elModel); $("elbox").classList.remove("open"); if(started) showMic(); else document.body.style.cursor="none"; });
+["elKey","elVoice","elModel"].forEach(id=>$(id).addEventListener("keydown",e=>{ e.stopPropagation(); if(e.key==="Enter") $("elSave").click(); }));
+function newStudent(){ hands.forEach(h=>{ h.g.visible=true; h.g.scale.setScalar(1); }); silenceStage=0; timeCloseSent=false; endingAt=0; goneFade=0; atom.visible=true; $("mic").classList.remove("gone"); if(!active){ startListening(); micState("on"); } focus=null; pendingFocus=null; countType=null; for(const k in missionTurns) delete missionTurns[k]; history.length=0; stars=0; covered.clear(); assistantTurns=0; coverDoneTurn=-1; for(const k in coverAt) delete coverAt[k]; studentName=""; starredMissions.clear(); celebrating=false; pendingCelebrate=false; sessionStartMs=performance.now(); sessionEnded=false; starEarnedAt.fill(-10); applyTopic(); journeyStart(); log("session: new student"); }
+let started=false;
+function begin(){
+  if(started) return;
+  if(!apiKey&&!SERVER){ openKey(); return; }
+  started=true; initAudio(); prefetchPhrases();
+  if(SERVER&&!azKey){ fetchAzToken().then(ok=>{ if(ok&&active&&!az) startAzureSTT(); }); }
+  try{ speechSynthesis.speak(new SpeechSynthesisUtterance(" ")); }catch(e){}
+  active=true; micState("on"); showMic();
+  newStudent();
+}
+$("mic").addEventListener("click",e=>{ e.stopPropagation(); if(!started) begin(); else toggleListen(); });
+document.addEventListener("pointerdown",e=>{ if($("keybox").contains(e.target)||$("azbox").contains(e.target)||$("elbox").contains(e.target)||$("mic").contains(e.target)) return; if(!started) begin(); });
+document.addEventListener("mousemove",()=>{ if(started) showMic(); },{passive:true});
+let btn=store.get("btn",null), learnBtn=false;
+const keySig=e=>[e.code,e.ctrlKey?"c":"",e.metaKey?"m":"",e.altKey?"a":"",e.shiftKey?"s":""].join("|");
+function buttonPressed(){
+  log("button pressed");
+  if(!started){ begin(); return; }
+  if(sessionEnded){ newStudent(); return; }
+  if(mode==="speaking"||mode==="thinking"){ stopSpeak(); if(aborter) aborter.abort(); mode="idle"; requestFocus(null); resumeRec(); }
+}
+document.addEventListener("keydown",e=>{
+  if(e.target.tagName==="INPUT"||e.target.tagName==="SELECT") return;
+  if(learnBtn && !["MetaLeft","MetaRight","ControlLeft","ControlRight","AltLeft","AltRight","ShiftLeft","ShiftRight"].includes(e.code)){
+    e.preventDefault(); learnBtn=false; btn=keySig(e); store.set("btn",btn); micState(active?"on":"off"); log("button learned: "+btn); sfx("success"); return; }
+  if(btn && keySig(e)===btn){ e.preventDefault(); buttonPressed(); return; }
+  const k=(e.key||"").toLowerCase();
+  if(k==="v"||k==="ر"||e.code==="KeyV"){ openAz(); return; }
+  if(k==="b"||k==="لا"||e.code==="KeyB"){ learnBtn=true; initAudio(); micState("err"); showMic(); log("button learn: press the external button now"); return; }
+  if(k==="e"||k==="ث"||e.code==="KeyE"){ openEl(); return; }
+  if(k==="k"||k==="ن"||e.code==="KeyK"){ openKey(); return; }
+  if(k==="d"||k==="ي"||e.code==="KeyD"){ const d=$("dbg"); d.style.display=d.style.display==="block"?"none":"block";
+    log("debug: stt="+(canAzureSTT()?"azure":"chrome")+" claudeKey="+(apiKey?"set":"missing")+" eleven="+(useEleven()?"on":"off")+" azure="+((azKey&&azRegion)?azRegion:"none")+" SR="+(!!SR)+" active="+active); d.textContent=DBG.join("\n"); return; }
+  if(k==="1"||k==="١"){ topic="atom"; if(started) newStudent(); else applyTopic(); return; }
+
+  if(!started){ begin(); return; }
+  if(e.code==="Space"){ e.preventDefault(); buttonPressed(); }
+  else if(e.key==="Escape"){ stopSpeak(); if(aborter) aborter.abort(); mode="idle"; requestFocus(null); resumeRec(); }
+  else if(k==="f"||k==="ب"||e.code==="KeyF"){ flipY=!flipY; store.set("flipY",flipY); applyFlip(); }
+  else if(k==="m"||k==="ة"||e.code==="KeyM"){ flipX=!flipX; store.set("flipX",flipX); applyFlip(); }
+  else if(k==="g"||k==="ل"||e.code==="KeyG"){ newStudent(); }
+});
+
+applyFlip();
+if(!apiKey&&!SERVER) openKey();
+})();
+</script>
+</body>
+</html>
