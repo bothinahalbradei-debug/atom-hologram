@@ -159,7 +159,8 @@ const SERVER=!/^file:/.test(location.protocol);
 let accessCode=store.get("access","");
 const srvHeaders=()=>({"content-type":"application/json","x-access-code":accessCode||""});
 const useServerClaude=()=>!apiKey&&SERVER;
-const useServerVoice=()=>!(elKey&&elVoice)&&SERVER;
+const OPENAI=SERVER;   // صوت OpenAI واستماعه عبر الوسيط
+const useServerVoice=()=>SERVER&&(OPENAI||!(elKey&&elVoice));
 const useEleven=()=>!!(elKey&&elVoice)||useServerVoice();
 async function needsAccess(r){ if(r.status!==401) return false; try{ const t=await r.clone().text(); if(/^\s*(access|\{"error":"access"\})\s*$/.test(t)) return true; log("service error 401: "+t.slice(0,160)); }catch(e){} return false; }
 async function askAccess(){ const c=prompt("اكتبي رمز التجربة:"); if(c){ accessCode=c.trim(); store.set("access",accessCode); return true; } return false; }
@@ -688,7 +689,7 @@ function loop(){
   // أرضية وحلقة الاستماع
   floor.position.y=topic==="plant"?-2.1:-1.75; ring.position.y=floor.position.y+0.03;
   floor.material.opacity=0.55+Math.sin(t*1.2)*0.08;
-  const ready=(!!rec||azRunning)&&mode==="idle"&&!J.busy;
+  const ready=(!!rec||azRunning||oaiListening)&&mode==="idle"&&!J.busy;
   const rt=mode==="hearing"?.8:mode==="thinking"?.5:ready?.28+Math.sin(t*2.5)*0.08:0;
   ring.material.opacity=ease(ring.material.opacity,rt,0.1); ring.material.color.setHex(mode==="thinking"?0xffd166:0x6ee7f9);
   ring.scale.setScalar(mode==="hearing"?1+Math.sin(t*4)*0.05:1);
@@ -765,8 +766,9 @@ const esc=t=>t.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 async function elevenBlob(text,tries){
   tries=tries||0;
   if(useServerVoice()){
-    let r=await fetch("/.netlify/functions/tts",{method:"POST",headers:srvHeaders(),body:JSON.stringify({text,model_id:elModel})});
-    if(await needsAccess(r)&&await askAccess()) r=await fetch("/.netlify/functions/tts",{method:"POST",headers:srvHeaders(),body:JSON.stringify({text,model_id:elModel})});
+    const ep=OPENAI?"/.netlify/functions/tts-openai":"/.netlify/functions/tts";
+    let r=await fetch(ep,{method:"POST",headers:srvHeaders(),body:JSON.stringify({text,model_id:elModel})});
+    if(await needsAccess(r)&&await askAccess()) r=await fetch(ep,{method:"POST",headers:srvHeaders(),body:JSON.stringify({text,model_id:elModel})});
     log("tts(server): status "+r.status);
     if((r.status===429||r.status>=500)&&tries<3){ await new Promise(z=>setTimeout(z,600+tries*500)); return elevenBlob(text,tries+1); }
     if(!r.ok){ log("tts error: "+(await r.text().catch(()=>"")).slice(0,200)); throw new Error("tts "+r.status); }
@@ -996,7 +998,7 @@ function flushHeard(){ const q=(heardBuf+" "+interimText).trim(); heardBuf=""; i
 let az=null, azRunning=false, azSessionStart=0;
 let azToken=null, azTokRegion="", azTokAt=0;
 async function fetchAzToken(){ try{ const r=await fetch("/.netlify/functions/stt-token",{headers:srvHeaders()}); if(await needsAccess(r)){ if(await askAccess()) return fetchAzToken(); return false; } if(!r.ok){ log("stt token error "+r.status+": "+(await r.text()).slice(0,160)); return false; } const d=await r.json(); if(d.token){ azToken=d.token; azTokRegion=d.region; azTokAt=performance.now(); log("stt token: ok"); return true; } }catch(e){ log("stt token failed: "+e.message); } return false; }
-const canAzureSTT=()=>!!(((azKey&&azRegion)||(SERVER&&azToken))&&window.SpeechSDK);
+const canAzureSTT=()=>!OPENAI&&!!(((azKey&&azRegion)||(SERVER&&azToken))&&window.SpeechSDK);
 setInterval(async()=>{ if(SERVER&&!azKey&&azToken&&performance.now()-azTokAt>8*60000){ await fetchAzToken(); if(az) az.authorizationToken=azToken; } },60000);
 function overlapsSpeech(e){
   const now=performance.now(), dur=(e.result.duration||0)/10000, end=now-750, start=end-dur;
@@ -1031,6 +1033,7 @@ function stopAzureSTT(){ if(az){ const a=az; az=null; azRunning=false; try{ a.st
 function pauseRec(){ if(canAzureSTT()){ paused=true; log("listen: paused while speaking (azure keeps mic, filters own voice)"); return; } paused=true; if(rec){ try{ rec.abort(); }catch(e){} } log("listen: paused while speaking"); }
 function resumeRec(){ if(!paused) return; if(canAzureSTT()){ paused=false; if(active&&!az) startAzureSTT(); return; } setTimeout(()=>{ paused=false; if(active&&!rec) startListening(); log("listen: resumed"); },250); }
 function startListening(){
+  if(OPENAI){ active=true; if(!oaiListening){ oaiListening=true; startMicMonitor(); log("listen: openai"); } return; }
   if(canAzureSTT()){ active=true; startAzureSTT(); return; }
   if(!SR){ say("",0); log("no SpeechRecognition (use Chrome)"); return; }
   if(rec||paused) return;
@@ -1243,13 +1246,38 @@ function journeySilence(stage){
 
 // تنبيه عند صمت الطالبة
 let silenceStage=0, lastHeardMs=0, lastVoiceMs=0, micMon=null;
+let oaiListening=false;
+const vad={rec:null,chunks:[],on:false,start:0,loud:0};
+function vadTick(stream,rms){
+  if(!OPENAI||!active||sessionEnded) return;
+  const now=performance.now();
+  const canHear=mode!=="speaking"&&mode!=="thinking"&&!J.busy&&now-speakEnd>500;
+  if(!canHear){ if(vad.on){ try{ vad.rec.onstop=null; vad.rec.stop(); }catch(e){} vad.on=false; } return; }
+  if(rms>0.045){ vad.loud=now;
+    if(!vad.on){ vad.on=true; vad.start=now; vad.chunks=[];
+      try{ vad.rec=new MediaRecorder(stream,{mimeType:MediaRecorder.isTypeSupported("audio/webm;codecs=opus")?"audio/webm;codecs=opus":"audio/webm"}); }catch(e){ vad.rec=new MediaRecorder(stream); }
+      vad.rec.ondataavailable=e=>{ if(e.data&&e.data.size) vad.chunks.push(e.data); };
+      vad.rec.start(); mode="hearing"; lastHeardMs=now; silenceStage=0; } }
+  if(vad.on&&now-vad.loud>900){ vad.on=false; const dur=vad.loud-vad.start, rec=vad.rec;
+    rec.onstop=()=>{ if(dur<350){ if(mode==="hearing") mode="idle"; return; } transcribe(new Blob(vad.chunks,{type:rec.mimeType||"audio/webm"})); };
+    try{ rec.stop(); }catch(e){} }
+}
+async function transcribe(blob){
+  mode="thinking"; const t0=performance.now();
+  try{ const b64=await new Promise(res=>{ const fr=new FileReader(); fr.onload=()=>res(String(fr.result).split(",")[1]); fr.readAsDataURL(blob); });
+    const r=await fetch("/.netlify/functions/stt-openai",{method:"POST",headers:srvHeaders(),body:JSON.stringify({audio:b64,mime:blob.type})});
+    const d=await r.json().catch(()=>({})); const txt=(d.text||"").trim();
+    log("stt(openai): "+r.status+" "+Math.round(performance.now()-t0)+"ms: "+(txt||(d.error&&d.error.message)||""));
+    mode="idle"; if(txt){ heardBuf=txt; flushHeard(); }
+  }catch(e){ log("stt(openai) failed: "+e.message); mode="idle"; }
+}
 async function startMicMonitor(){
   if(micMon) return;
   try{ const stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}});
     initAudio(); const src=audioCtx.createMediaStreamSource(stream); const an=audioCtx.createAnalyser(); an.fftSize=1024; src.connect(an);
-    const buf=new Uint8Array(an.fftSize); micMon={an,buf};
+    const buf=new Uint8Array(an.fftSize); micMon={an,buf,stream};
     setInterval(()=>{ an.getByteTimeDomainData(buf); let s2=0; for(let i=0;i<buf.length;i++){ const v=(buf[i]-128)/128; s2+=v*v; }
-      const rms=Math.sqrt(s2/buf.length); if(rms>0.04&&mode!=="speaking") lastVoiceMs=performance.now(); },100);
+      const rms=Math.sqrt(s2/buf.length); if(rms>0.04&&mode!=="speaking") lastVoiceMs=performance.now(); vadTick(stream,rms); },100);
     log("mic monitor: on"); }catch(e){ log("mic monitor failed: "+e.message); }
 }
 setInterval(()=>{
@@ -1268,7 +1296,7 @@ setInterval(()=>{
   if(canAzureSTT()){ if(!az){ log("watchdog: restart azure stt"); startAzureSTT(); } return; }
   if(!paused && !rec && mode!=="speaking" && mode!=="thinking"){ log("watchdog: restart listening"); startListening(); }
 },3000);
-function stopListening(){ active=false; stopAzureSTT(); if(rec){ try{rec.abort();}catch(e){} rec=null; } micState("off"); }
+function stopListening(){ active=false; oaiListening=false; stopAzureSTT(); if(rec){ try{rec.abort();}catch(e){} rec=null; } micState("off"); }
 function toggleListen(){ if(active) stopListening(); else { startListening(); micState("on"); } showMic(); }
 
 /* ---------- المفاتيح والبدء ---------- */
@@ -1293,7 +1321,7 @@ function begin(){
   if(started) return;
   if(!apiKey&&!SERVER){ openKey(); return; }
   started=true; initAudio(); prefetchPhrases();
-  if(SERVER&&!azKey){ fetchAzToken().then(ok=>{ if(ok&&active&&!az) startAzureSTT(); }); }
+  if(SERVER&&!azKey&&!OPENAI){ fetchAzToken().then(ok=>{ if(ok&&active&&!az) startAzureSTT(); }); }
   try{ speechSynthesis.speak(new SpeechSynthesisUtterance(" ")); }catch(e){}
   active=true; micState("on"); showMic();
   newStudent();
