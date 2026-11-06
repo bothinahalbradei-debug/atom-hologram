@@ -197,7 +197,7 @@ function partOf(chunk){
 const NUMW=[["واحد",1],["واحدة",1],["اثنان",2],["اثنين",2],["اثنتان",2],["ثلاث",3],["ثلاثة",3],["أربع",4],["اربع",4],["أربعة",4],["خمس",5],["خمسة",5],["ست",6],["ستة",6],["سبع",7],["سبعة",7],["ثمان",8],["ثماني",8],["ثمانية",8],["تسع",9],["تسعة",9],["عشر",10],["عشرة",10]];
 function countIn(chunk){ const s=strip(chunk); const d=s.match(/\d+/); if(d) return Math.min(18,+d[0]);
   const words=s.split(/[\s،.؟!:]+/); for(const w of words){ const f=NUMW.find(([a])=>a===w||("و"+a)===w); if(f) return f[1]; } return 0; }
-function onChunk(c){ const p=partOf(c); if(!p) return; requestFocus(p);
+function onChunk(c){ const p=partOf(c); if(!p) return; if(J&&J.steps&&J.steps.length) return; requestFocus(p);
   if(/عد[يّ]|عدي|عدّي/.test(strip(c))) return;
 }
 const splitChunks=text=>text.replace(/\s+/g," ").split(/(?<=[.!؟?،:])\s+/).filter(x=>x.trim());
@@ -1136,11 +1136,13 @@ const ADDR=["يا جميلتي","يا حلوة","يا بطلة","يا صديقت
 const PRAISE_W=["رائع!","أحسنتِ!","ممتاز!","برافو عليكِ!","واو، إجابة ذكية!","يا سلام!"];
 const pick=a=>a[Math.floor(Math.random()*a.length)];
 const norm=t=>strip(String(t||"").replace(/[٠-٩]/g,d=>"٠١٢٣٤٥٦٧٨٩".indexOf(d)).replace(/[۰-۹]/g,d=>"۰۱۲۳۴۵۶۷۸۹".indexOf(d))).replace(/[إأآا]/g,"ا").replace(/ى/g,"ي").replace(/ة/g,"ه").replace(/[^\u0621-\u064A0-9\s]/g," ").replace(/\s+/g," ").trim();
+const TERM_RE={ذر:/ذر/, نوا:/نوا|نوى|نواه/, الكت:/كترون|لكترو|سترون|ليكترون|اكترون/, بروت:/برو?تون|بلوتون|بروتو|بورتون/, نيوت:/نيو?ترون|نترون|نوترون|نيوتر|نيترون/};
+function termRe(word){ const w=norm(word); if(/ذر/.test(w)) return TERM_RE.ذر; if(/نوا/.test(w)) return TERM_RE.نوا; if(/كترون/.test(w)) return TERM_RE.الكت; if(/بروتون/.test(w)) return TERM_RE.بروت; if(/نيوترون/.test(w)) return TERM_RE.نيوت; return null; }
 const CONFUSED=/ما فهمت|مافهمت|ما نفهم|ما فهمتك|ما نفهمك|(اش|ايش|وش|شو) تقول|ما سمعت|عيدي|اعيدي|مره ثانيه|ما اعرف وش/;
 const SOCIAL=/احبك|شكرا|مشكوره|انتي حلوه|انت حلوه|جميله|اموت فيك|عسل|كيفك|كيف حالك|شخبارك|اسمك|كم عمرك/;
 const DONTKNOW=/لا اعرف|ما اعرف|مدري|ما ادري|لا ادري|ماعرف|ما عرفت|صعب|نسيت|ما اذكر|ما اتذكر|لا اتذكر/;
 const NUMJ={"واحد":1,"اثنين":2,"اثنان":2,"ثلاث":3,"ثلاثه":3,"اربع":4,"اربعه":4,"خمس":5,"خمسه":5,"ست":6,"سته":6,"سبع":7,"سبعه":7,"ثمان":8,"ثمانيه":8};
-function numIn(t){ const n=norm(t); const d=n.match(/\d+/); if(d) return +d[0]; for(const w of n.split(" ")){ if(NUMJ[w]!=null) return NUMJ[w]; } return null; }
+function numIn(t){ const n=norm(t); let last=null; n.split(" ").forEach(w=>{ const w2=w.replace(/^(و|ف)(?=\S{2,})/,""); if(/^\d+$/.test(w)) last=+w; else if(NUMJ[w]!=null) last=NUMJ[w]; else if(NUMJ[w2]!=null) last=NUMJ[w2]; }); return last; }
 
 // كل خطوة: ما تقوله، وما يُبرَز، وما تتوقعه، والتلميحات بالتدرج
 // "قولي معي" فقط مع: الذرة، النواة، الإلكترونات
@@ -1153,14 +1155,14 @@ function buildSteps(){
       ok:()=>"صح! أنا الذرة! قولي معي: الذرة!",
       ladder:[()=>"اسمي الذرة! قولي معي: الذرة!"]},
     {id:"heart", focus:"nucleus", say:()=>"انظري إلى وسطي! هنا قلبي الصغير. خمّني، ما اسم قلبي؟",
-      expect:/نوا|نواه|نوات/, q:"ما اسم قلب الذرة الذي في وسطها؟", ans:"النواة",
+      expect:/نوا|نواه|نوات|نوى/, q:"ما اسم قلب الذرة الذي في وسطها؟", ans:"النواة",
       ok:()=>"صح! قلبي اسمه النواة! انظري، هنا في وسطي. قولي معي: النواة!",
       ladder:[()=>"اسم قلبي مثل الشيء الصغير الذي في وسط حبة التمر! ما اسم قلبي؟",()=>"هل اسم قلبي النواة أم الإلكترون؟",()=>"اسم قلبي النواة! قولي معي: النواة!"]},
     {id:"where", focus:"nucleus", say:()=>"هذه هي النواة! انظري إليّ جيدا: أين توجد النواة؟",
       expect:/وسط|مركز|منتصف|نص/, q:"أين توجد النواة في الذرة؟", ans:"في الوسط",
       confirm:()=>"نعم، في وسطي تماما، مثل نواة التمرة!",
       ladder:[()=>"انظري جيدا: هل النواة على أطرافي أم في وسطي؟",()=>"النواة في وسطي تماما، مثل نواة التمرة!"]},
-    {id:"pname", focus:"proton", word:"بروتونات", repeat:true, keepLabel:true,
+    {id:"pname", focus:"proton", repeat:true, keepLabel:true,
       say:()=>"هيا نكتشف ما داخل قلبي! انظري إلى هذه الحبة الحمراء، اسمها بروتون. بروتون واحد. وكل الحبات الحمراء معا، اسمها بروتونات! قولي معي: بروتون!"},
     {id:"count", focus:"proton", count:"proton", word:"بروتونات",
       say:()=>"انظري، ستضيء البروتونات واحدة واحدة. هيا عدّي معي بصوت عال!",
@@ -1169,7 +1171,7 @@ function buildSteps(){
       ladder:[()=>"",()=>`عندي ${protons.length} بروتونات!`], recount:true},
     {id:"psign", focus:"proton", caption:"+  مُوجب",
       say:()=>"انظري إلى العلامة على البروتون: زائد. وهذه تعني أن شحنته موجبة!", auto:true},
-    {id:"nname", focus:"neutron", word:"نيوترونات", repeat:true, keepLabel:true,
+    {id:"nname", focus:"neutron", repeat:true, keepLabel:true,
       say:()=>"وانظري إلى هذه الحبة الرمادية، اسمها نيوترون. نيوترون واحد. وكل الحبات الرمادية معا، اسمها نيوترونات! وهي متعادلة، ليس لها شحنة. قولي معي: نيوترون!"},
     {id:"ncount", focus:"neutron", count:"neutron", word:"نيوترونات",
       say:()=>"انظري، ستضيء النيوترونات واحدة واحدة. هيا عدّي معي بصوت عال!",
@@ -1180,7 +1182,7 @@ function buildSteps(){
       expect:/موجب|زايد|زائد|\+/, q:"ما شحنة البروتونات؟", ans:"موجبة",
       ladder:[()=>"انظري إلى العلامة على البروتون: زائد. ماذا تعني؟",()=>"هل شحنتها موجبة أم سالبة؟",()=>"شحنة البروتونات موجبة!"]},
     {id:"inside", focus:"revealPN", say:()=>"بعدما عددنا معا، قولي لي: ماذا يوجد داخل النواة؟",
-      expectBoth:[/بروتون/,/نيوترون|نترون|نيترون/], expect:/بروتون.*(نيوترون|نترون|نيترون)|(نيوترون|نترون|نيترون).*بروتون/, q:"ماذا يوجد داخل النواة؟", ans:"البروتونات والنيوترونات",
+      expectBoth:[/برو?تون|بلوتون|بروتو|بورتون/,/نيو?ترون|نترون|نوترون|نيوتر|نيترون/], expect:/(برو?تون|بروتو).*(نيو?ترون|نترون|نوترون|نيوتر)|(نيو?ترون|نترون|نوترون|نيوتر).*(برو?تون|بروتو)/, q:"ماذا يوجد داخل النواة؟", ans:"البروتونات والنيوترونات",
       partial:()=>"صحيح! ومعها نوع آخر من الحبات. انظري داخل قلبي، ما اسمها؟",
       partialEnd:()=>"لا بأس! داخل النواة النوعان معا: البروتونات والنيوترونات!",
       reveal:true,
@@ -1207,10 +1209,10 @@ function buildSteps(){
       ladder:[()=>"فكري: لو كان بينهما تنافر، لهربت إلكتروناتي بعيدا! فهل بينهما تجاذب أم تنافر؟",()=>"بينهما تجاذب! الموجب يجذب السالب، لذلك تبقى إلكتروناتي قريبة مني."], last:true},
     {id:"facts", focus:"nucleus", say:()=>"تعرفين شيئا عجيبا؟ لو كبرت بحجم ملعب كرة، لكانت نواتي بحجم حبة حمص في وسطه! يعني نواتي في الحقيقة أصغر بكثير، لكني كبرتها لكِ. وأغلب وزني في قلبي الصغير، أما الإلكترونات، فخفيفة جدا!", auto:true},
     {id:"surprise", say:()=>`واو! مفاجأة! أنتِ الآن عالمة الذرة الصغيرة! هيا نثبت ذلك! تحدي العالمة: ما اسم قلبي؟`, surprise:true,
-      expect:/نوا/, q:"ما اسم قلب الذرة؟", ans:"النواة", soft:()=>"لا بأس، تذكري: اسم قلبي النواة! قولي معي: النواة!"},
-    {id:"recap2", focus:"electron", say:()=>"ومن يدور حولي؟", expect:/[اإ]لكترون|الكترون/, q:"من يدور حول نواة الذرة؟", ans:"الإلكترونات", soft:()=>"لا بأس، تذكري: تدور حولي الإلكترونات! قولي معي: الإلكترونات!"},
-    {id:"closing", say:()=>"يا سلام! أنتِ عالمة حقيقية! عندكِ سؤال عني، أم أودّعكِ؟", closing:true},
-    {id:"bye", say:()=>`أنا الذرة، وسأبقى معكِ في كل شيء حولكِ. إلى اللقاء ${pick(ADDR)}!`, bye:true}
+      expect:/نوا|نوى/, q:"ما اسم قلب الذرة؟", ans:"النواة", soft:()=>"لا بأس، تذكري: اسم قلبي النواة! قولي معي: النواة!"},
+    {id:"recap2", focus:"electron", say:()=>"ومن يدور حولي؟", expect:/كترون|لكترو|سترون|ليكترون|اكترون/, q:"من يدور حول نواة الذرة؟", ans:"الإلكترونات", soft:()=>"لا بأس، تذكري: تدور حولي الإلكترونات! قولي معي: الإلكترونات!"},
+    {id:"closing", say:()=>"يا سلام! أنتِ عالمة حقيقية! هل لديكِ سؤال عني، أم نقول مع السلامة؟", closing:true},
+    {id:"bye", say:()=>`مع السلامة يا عالمة الذرة! أنا الذرة، وسأبقى معكِ في كل شيء حولكِ. نلتقي مجددا!`, bye:true}
   ];
 }
 
@@ -1238,7 +1240,7 @@ async function nextStep(prefix){
   J.i++; const st=J.steps[J.i];
   if(st&&st.last===undefined&&J.steps[J.i-1]&&J.steps[J.i-1].last) J.missionsDoneAt=performance.now();
   // بعد 5 دقائق والمهمات منتهية: مباشرة إلى المفاجأة
-  if(st&&st.id==="facts"&&(performance.now()-sessionStartMs)/60000>5){ J.i++; }
+  if(st&&st.id==="facts"&&(performance.now()-sessionStartMs)/60000>8){ J.i++; }
   if(prefix){ await speakNow(prefix); }
   await runStep();
 }
@@ -1259,7 +1261,7 @@ async function judge(st,text){
   if(DONTKNOW.test(n)) return "dontknow";
   if(!apiKey&&!SERVER) return "wrong";
   try{
-    const d=await claudeCall({model:MODEL,max_tokens:120,thinking:thinkingOffOK?{type:"disabled"}:undefined,system:"أنت مقيّم إجابات لطالبة صغيرة تتحدث مع مجسّم ذرة. أعد JSON فقط بلا أي نص آخر، بالشكل: {\"v\":\"correct|wrong|dontknow|question|unclear|end\"}. correct إذا كان المعنى صحيحاً ولو بكلمات مختلفة. question إذا كانت تسأل سؤالاً. unclear فقط إذا كان الكلام مشوشاً لا يُفهم أبداً. أما الإجابة القصيرة المفهومة الخاطئة (مثل كلمة واحدة لا تطابق) فهي wrong وليست unclear. end إذا طلبت إنهاء المحادثة بوضوح. وإذا كان كلاماً ودياً (مثل أحبك أو شكراً) فاعتبريه question.",
+    const d=await claudeCall({model:MODEL,max_tokens:120,thinking:thinkingOffOK?{type:"disabled"}:undefined,system:"أنت مقيّم إجابات لطالبة صغيرة تتحدث مع مجسّم ذرة. النص مكتوب آلياً من كلام طفلة وقد يحتوي أخطاء في التهجئة، فاعتبري الإجابة صحيحة إذا كانت قريبة في النطق من الإجابة الصحيحة (مثل: سترونات أو لكترونات = إلكترونات، نترونات = نيوترونات). أعد JSON فقط بلا أي نص آخر، بالشكل: {\"v\":\"correct|wrong|dontknow|question|unclear|end\"}. correct إذا كان المعنى صحيحاً ولو بكلمات مختلفة. question إذا كانت تسأل سؤالاً. unclear فقط إذا كان الكلام مشوشاً لا يُفهم أبداً. أما الإجابة القصيرة المفهومة الخاطئة (مثل كلمة واحدة لا تطابق) فهي wrong وليست unclear. end إذا طلبت إنهاء المحادثة بوضوح. وإذا كان كلاماً ودياً (مثل أحبك أو شكراً) فاعتبريه question.",
         messages:[{role:"user",content:`السؤال: ${st.q}\nالإجابة الصحيحة: ${typeof st.ans==="function"?st.ans():st.ans}\nكلام الطالبة: ${text}`}]}); const t=(d.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("");
     const m=t.match(/"v"\s*:\s*"(\w+)"/); log("judge: "+(m?m[1]:"?")); return m?m[1]:"unclear";
   }catch(e){ log("judge failed: "+e.message); return "unclear"; }
@@ -1285,7 +1287,7 @@ async function onStudent(text){
   J.busy=true; mode="thinking"; log("student: "+text); hideCaption();
   try{
     J.turns=(J.turns||0)+1;
-    if(J.turns>4&&!st.closing&&!st.bye&&!J.waitRepeat){
+    if(J.turns>3&&!st.closing&&!st.bye&&!J.waitRepeat){
       const L=st.ladder||[]; const fin=L.length?L[L.length-1]():"";
       log("safety: moving on after "+J.turns+" turns");
       await nextStep(fin&&!/قولي معي/.test(fin)?("لا بأس! "+fin):"لا بأس، هيا نكمل رحلتنا!"); return; }
@@ -1304,10 +1306,11 @@ async function onStudent(text){
     if(J.waitRepeat){
       const word=(lastSpokenText.match(/قولي معي[^:]*:\s*([^!.؟]+)/)||[])[1]||"";
       const key=norm(word).replace(/^ال/,"").slice(0,4), said=norm(text);
-      if(key&&!said.includes(key)&&!J.repeatAsked&&!DONTKNOW.test(said)){ J.repeatAsked=true; await speakNow("قولي معي مرة أخرى: "+word.trim()+"!"); return; }
+      const tre=termRe(word), okRep=tre?tre.test(said):said.includes(key);
+      if(key&&!okRep&&!J.repeatAsked&&!DONTKNOW.test(said)){ J.repeatAsked=true; await speakNow("قولي معي مرة أخرى: "+word.trim()+"!"); return; }
       J.waitRepeat=false; J.repeatAsked=false; happyUntil=clock.getElapsedTime()+2.5;
-      await nextStep(said.includes(key)?pick(["أحسنتِ!","رائع!","ممتاز!","برافو عليكِ!"]):"لا بأس، هيا نكمل!"); return; }
-    if(SOCIAL.test(norm(text))&&!J.waitRepeat){ const a=await shortAnswer(text); await speakNow(a); if(!st.closing&&!st.any) await speakNow("سؤالي كان: "+(st.ask?st.ask():st.say().split(/[.!]\s/).pop())); else if(st.closing) await speakNow("هل لديكِ سؤال آخر، أم أودّعكِ؟"); return; }
+      await nextStep(okRep?pick(["أحسنتِ!","رائع!","ممتاز!","برافو عليكِ!"]):"لا بأس، هيا نكمل!"); return; }
+    if(SOCIAL.test(norm(text))&&!J.waitRepeat){ const a=await shortAnswer(text); await speakNow(a); if(!st.closing&&!st.any) await speakNow("سؤالي كان: "+(st.ask?st.ask():st.say().split(/[.!]\s/).pop())); else if(st.closing) await speakNow("هل لديكِ سؤال آخر، أم نقول مع السلامة؟"); return; }
     if(st.closing){
       const n=norm(text), W2=n.split(" ");
       const BYE=/(^| )(لا|لاء|خلاص|يكفي|بس|كفايه|انتهيت|ودعيني|اودعك|وداعا|باي|سلام|السلامه|شكرا)( |$)|الى اللقاء|مع السلامه|لا شكرا/;
@@ -1316,7 +1319,9 @@ async function onStudent(text){
       const v=await judge({q:"هل لديك سؤال أم أودعك؟",ans:"سؤال أو وداع"},text);
       if(v==="unclear"&&(J.unclear=(J.unclear||0)+1)<2){ await speakNow("لم أسمعكِ جيدا يا جميلتي، هل تعيدين؟"); return; }
       if(v==="end"){ await nextStep(); return; }
-      const a=await shortAnswer(text); await speakNow(a+" هل لديكِ سؤال آخر، أم أودّعكِ؟"); return;
+      J.qCount=(J.qCount||0)+1; const a=await shortAnswer(text);
+      if(J.qCount>=3){ await speakNow(a); await nextStep(); return; }
+      await speakNow(a+" هل لديكِ سؤال آخر، أم نقول مع السلامة؟"); return;
     }
     const CONF=/^(ايش|ايه|وش|شو|ماذا|ها|هاه|عيدي|اعيدي|ما فهمت|مافهمت|كيف|نعم|ايش تقولين|وش تقولين)$/;
     if((CONF.test(norm(text))||CONFUSED.test(norm(text)))&&!st.closing){ await speakNow("سؤالي هو: "+(st.ask?st.ask():st.say().split(/[.!]\s/).pop())); return; }
@@ -1361,6 +1366,7 @@ async function doCount(st){
   setFocusNow(st.focus); await new Promise(z=>setTimeout(z,500));
   countType=st.count; countN=n; countStart=clock.getElapsedTime(); pendingCount=null;
   await new Promise(z=>setTimeout(z,(n*COUNT_DT+0.8)*1000));
+  J.pending=null;
   await speakNow(st.ask());
 }
 let nextGreetAddr=pick(ADDR);
