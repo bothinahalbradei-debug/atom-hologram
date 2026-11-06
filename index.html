@@ -460,7 +460,7 @@ const arrowM=new THREE.MeshBasicMaterial({color:0xffe08a,transparent:true,opacit
 const arrows=[new THREE.Mesh(new THREE.ConeGeometry(0.07,0.2,16),arrowM),new THREE.Mesh(new THREE.ConeGeometry(0.07,0.2,16),arrowM)];
 arrows.forEach(a=>{ a.renderOrder=11; attG.add(a); });
 const UP=new THREE.Vector3(0,1,0); let attPick=-1;
-const LABELS={root:"الجذور",stem:"الساق",leaf:"الأوراق",flower:"الزهرة",seed:"البذور",nucleus:"النَّواة",proton:"بروتون  +",neutron:"نيوترون  0",attract:"بروتون + مُوجب",revealN:"نيوترون 0 مُتعادل",revealP:"بروتون + مُوجب",revealPN:"بروتون + مُوجب",electron:"إلكترون  −",orbit:"مستويات الطاقة"};
+const LABELS={root:"الجذور",stem:"الساق",leaf:"الأوراق",flower:"الزهرة",seed:"البذور",nucleus:"النَّواة",proton:"بروتون",neutron:"نيوترون",attract:"",revealN:"نيوترون",revealP:"بروتون",revealPN:"بروتون",electron:"إلكترون",orbit:"مستويات الطاقة"};
 let studentName="", surpriseAt=-10, goneFade=0, waveUntil=0;
 /* التاج الذهبي */
 const crownG=new THREE.Group(); scene.add(crownG); crownG.visible=false;
@@ -515,7 +515,7 @@ const W={p:1,n:1,e:1,o:1,open:0,pop:0,point:0};
 function targets(){
   const D=0.15,B=1.6;
   switch(focus){
-    case "nucleus": return {p:B,n:B,e:D,o:D,open:1,pop:0,point:1};
+    case "nucleus": return {p:1,n:1,e:D,o:D,open:0,pop:0,point:1};
     case "proton":  return {p:B,n:0.3,e:D,o:D,open:1,pop:1,point:1};
     case "neutron": return {p:0.3,n:B,e:D,o:D,open:1,pop:1,point:1};
     case "revealN": return {p:0.6,n:B,e:D,o:D,open:1,pop:1,point:1};
@@ -619,7 +619,7 @@ function loop(){
     const breathe=1+Math.sin(t*2.2)*0.012;
     body.scale.setScalar(breathe*(1+Math.max(0,(W.p+W.n)/2-1)*0.08));
     nucSkin.opacity=1-W.open*0.78; nucSkin.depthWrite=nucSkin.opacity>0.6; nucSphere.renderOrder=nucSkin.opacity<0.9?2:-3;
-    nucGlow.material.opacity=0.24+Math.max(0,(W.p+W.n)/2-1)*0.3+(covered.has('n')?0.12:0)+(covered.has('pn')?0.08:0);
+    nucGlow.material.opacity=(focus==="nucleus"?0.35+0.2*Math.sin(t*4):0)+0.24+Math.max(0,(W.p+W.n)/2-1)*0.3+(covered.has('n')?0.12:0)+(covered.has('pn')?0.08:0);
     particles.rotation.y=t*0.2; particles.visible=W.open>0.03;
     camDir.copy(camera.position).sub(body.getWorldPosition(tmp)).normalize();
     const popTarget=body.getWorldPosition(V()).addScaledVector(camDir,ATOM_R+0.3).add(tmp.set(0.55,0.35,0));
@@ -688,22 +688,21 @@ function loop(){
   caption.sp.position.set(0,-1.55,0.6); caption.sp.material.opacity=ease(caption.sp.material.opacity,capOn?1:0,0.12);
   // اللافتة
   drawPill(label,focus?LABELS[focus]:"",64,"rgba(110,231,249,.9)");
-  if(hasT) label.sp.position.copy(tp).add(tmp.set(0,0.45,0.25));
+  if(hasT) label.sp.position.copy(tp).add(focus==="nucleus"?tmp.set(0,-ATOM_R-0.25,0.6):tmp.set(0,0.45,0.25));
   const isRev=/^reveal/.test(focus||"")||focus==="attract";
   if(isRev) label.sp.position.copy(revealPos[focus==="revealN"?1:0]).add(tmp.set(0,0.42,0.2));
-  label.sp.material.opacity=ease(label.sp.material.opacity,(focus&&(t-focusSince<5||isRev))?1:0,0.08);
-  if(focus==="revealPN"){ drawPill(label2,"نيوترون 0 مُتعادل",64,"rgba(110,231,249,.9)"); label2.sp.position.copy(revealPos[1]).add(tmp.set(0,0.42,0.2)); }
+  label.sp.material.opacity=ease(label.sp.material.opacity,(focus&&LABELS[focus]&&!countType&&(t-focusSince<5||isRev||(J.steps[J.i]||{}).keepLabel))?1:0,0.08);
+  if(focus==="revealPN"){ drawPill(label2,"نيوترون",64,"rgba(110,231,249,.9)"); label2.sp.position.copy(revealPos[1]).add(tmp.set(0,0.42,0.2)); }
   if(focus==="attract"&&attPick!==focusSince){ attPick=focusSince; let best=0,bx=-1e9; electrons.forEach((x,i)=>{ const p=x.g.getWorldPosition(V()); if(p.x>bx){ bx=p.x; best=i; } }); featured.e=best; }
   const attOn=focus==="attract"&&electrons[featured.e]&&W.open>0.25;
   if(focus==="attract"){ if(isRev||true) label.sp.position.copy(revealPos[0]).add(tmp.set(0,0.42,0.2)); }
   if(attOn){ const ep=electrons[featured.e].g.getWorldPosition(V()), pp=revealPos[0];
-    drawPill(label2,"إلكترون − سالب",64,"rgba(110,231,249,.9)"); label2.sp.position.copy(ep).add(tmp.set(0,0.42,0.2));
     attLineGeo.attributes.position.setXYZ(0,pp.x,pp.y,pp.z); attLineGeo.attributes.position.setXYZ(1,ep.x,ep.y,ep.z); attLineGeo.attributes.position.needsUpdate=true; attLine.computeLineDistances();
     const dir=V().subVectors(ep,pp), k=0.5+0.5*Math.sin(t*4), d=dir.clone().normalize();
     arrows[0].position.copy(pp).addScaledVector(dir,0.22+0.08*k); arrows[0].quaternion.setFromUnitVectors(UP,d);
     arrows[1].position.copy(ep).addScaledVector(dir,-(0.22+0.08*k)); arrows[1].quaternion.setFromUnitVectors(UP,d.clone().negate()); }
   attLine.material.opacity=ease(attLine.material.opacity,attOn?0.9:0,0.1); arrowM.opacity=ease(arrowM.opacity,attOn?1:0,0.1);
-  label2.sp.material.opacity=ease(label2.sp.material.opacity,(focus==="revealPN"||attOn)?1:0,0.08);
+  label2.sp.material.opacity=ease(label2.sp.material.opacity,focus==="revealPN"?1:0,0.08);
 
   // نجوم الهالة حول الشخصية، وتاج + اسم عند الثالثة
   const crown=false;
@@ -723,7 +722,7 @@ function loop(){
   drawPill(nameTag,showName?((studentName?studentName+"، ":"")+(topic==="plant"?"صديقة النبات الصغيرة":"عالِمة الذرة الصغيرة")):"",70,"rgba(255,209,102,.95)");
   nameTag.sp.position.copy(headTop).add(tmp.set(0,0.45,0.35)); nameTag.sp.position.y=Math.min(nameTag.sp.position.y,2.05); nameTag.sp.material.opacity=ease(nameTag.sp.material.opacity,showName?1:0,0.08);
 
-  if(countType){ const k=Math.floor((t-countStart)/1.3); if(k!==loop.lastCount&&k<countN&&k>=0){ loop.lastCount=k; sfx("pop"); } } else loop.lastCount=-1;
+  if(countType){ const k=Math.floor((t-countStart)/1.3); { const kk=Math.max(0,Math.min(countN-1,k)); if(countType==="proton") featured.p=kk; else if(countType==="neutron") featured.n=kk; else if(countType==="electron") featured.e=kk; } if(k!==loop.lastCount&&k<countN&&k>=0){ loop.lastCount=k; sfx("pop"); } } else loop.lastCount=-1;
   // مفاجأة النجمة الثالثة
   const surp=celebrating?Math.max(0,Math.min(1,(t-surpriseAt)/0.8)):0;
   crownG.visible=surp>0&&atom.visible;
@@ -1129,7 +1128,7 @@ function startListening(){
 const ADDR=["يا جميلتي","يا حلوة","يا بطلة","يا صديقتي"];
 const PRAISE_W=["رائع!","أحسنتِ!","ممتاز!","برافو عليكِ!","واو، إجابة ذكية!","يا سلام!"];
 const pick=a=>a[Math.floor(Math.random()*a.length)];
-const norm=t=>strip(t||"").replace(/[إأآا]/g,"ا").replace(/ى/g,"ي").replace(/ة/g,"ه").replace(/[^\u0621-\u064A0-9\s]/g," ").replace(/\s+/g," ").trim();
+const norm=t=>strip(String(t||"").replace(/[٠-٩]/g,d=>"٠١٢٣٤٥٦٧٨٩".indexOf(d)).replace(/[۰-۹]/g,d=>"۰۱۲۳۴۵۶۷۸۹".indexOf(d))).replace(/[إأآا]/g,"ا").replace(/ى/g,"ي").replace(/ة/g,"ه").replace(/[^\u0621-\u064A0-9\s]/g," ").replace(/\s+/g," ").trim();
 const CONFUSED=/ما فهمت|مافهمت|ما نفهم|ما فهمتك|ما نفهمك|(اش|ايش|وش|شو) تقول|ما سمعت|عيدي|اعيدي|مره ثانيه|ما اعرف وش/;
 const SOCIAL=/احبك|شكرا|مشكوره|انتي حلوه|انت حلوه|جميله|اموت فيك|عسل|كيفك|كيف حالك|شخبارك|اسمك|كم عمرك/;
 const DONTKNOW=/لا اعرف|ما اعرف|مدري|ما ادري|لا ادري|ماعرف|ما عرفت|صعب|نسيت|ما اذكر|ما اتذكر|لا اتذكر/;
@@ -1142,11 +1141,11 @@ function buildSteps(){
   return [
     {id:"greet", say:()=>greetText(), any:true},
     {id:"around", say:()=>"اسمعي سري: جسمكِ، وكل شيء حولكِ، مصنوع من ذرات مثلي! يا سلام! انظري حولكِ: اللوحة، والنبتة، والكرسي، والطاولة، كلها ذرات! وحتى يدكِ التي تحركينها الآن! هيا، انظري حولكِ، وأعطيني شيئا آخر مصنوعا من ذرات!", around:true},
-    {id:"secret", say:()=>"وأنا، اسمي الذرة. هممم، ما اسمي؟",
+    {id:"secret", word:"الذرّة", say:()=>"وأنا، اسمي الذرة. هممم، ما اسمي؟",
       expect:/ذر/, q:"ما اسم الشخصية التي تتكلم؟", ans:"الذرة",
       ok:()=>"صح! أنا الذرة! قولي معي: الذرة!",
       ladder:[()=>"اسمي الذرة! قولي معي: الذرة!"]},
-    {id:"heart", focus:"nucleus", say:()=>"أنا الذرة، عندي قلب صغير في وسطي. خمّني، ما اسم قلبي؟",
+    {id:"heart", focus:"nucleus", say:()=>"انظري إلى وسطي! هنا قلبي الصغير. خمّني، ما اسم قلبي؟",
       expect:/نوا|نواه|نوات/, q:"ما اسم قلب الذرة الذي في وسطها؟", ans:"النواة",
       ok:()=>"صح! قلبي اسمه النواة! انظري، هنا في وسطي. قولي معي: النواة!",
       ladder:[()=>"اسم قلبي مثل الشيء الصغير الذي في وسط حبة التمر! ما اسم قلبي؟",()=>"هل اسم قلبي النواة أم الإلكترون؟",()=>"اسم قلبي النواة! قولي معي: النواة!"]},
@@ -1154,45 +1153,49 @@ function buildSteps(){
       expect:/وسط|مركز|منتصف|نص/, q:"أين توجد النواة في الذرة؟", ans:"في الوسط",
       confirm:()=>"نعم، في وسطي تماما، مثل نواة التمرة!",
       ladder:[()=>"انظري جيدا: هل النواة على أطرافي أم في وسطي؟",()=>"النواة في وسطي تماما، مثل نواة التمرة!"]},
-    {id:"count", focus:"proton", count:"proton",
-      say:()=>"هيا نكتشف ما داخل قلبي! داخل النواة حبات صغيرة، اسمها البروتونات. انظري، ستضيء واحدة واحدة. هيا عدّي معي البروتونات بصوت عال!",
+    {id:"pname", focus:"proton", word:"بروتونات", repeat:true, keepLabel:true,
+      say:()=>"هيا نكتشف ما داخل قلبي! انظري إلى هذه الحبة الحمراء، اسمها بروتون. بروتون واحد. وكل الحبات الحمراء معا، اسمها بروتونات! قولي معي: بروتون!"},
+    {id:"count", focus:"proton", count:"proton", word:"بروتونات",
+      say:()=>"انظري، ستضيء البروتونات واحدة واحدة. هيا عدّي معي بصوت عال!",
       ask:()=>"كم بروتونا عندي؟",
       expectNum:()=>protons.length, q:"كم بروتوناً مضيئاً؟", ans:()=>String(protons.length),
       ladder:[()=>"",()=>`عندي ${protons.length} بروتونات!`], recount:true},
-    {id:"psign", focus:"proton", caption:"+   =   مُوجبة",
+    {id:"psign", focus:"proton", caption:"+  مُوجب",
       say:()=>"انظري إلى العلامة على البروتون: زائد. وهذه تعني أن شحنته موجبة!", auto:true},
-    {id:"ncount", focus:"neutron", count:"neutron",
-      say:()=>"وفي النواة حبات أخرى، اسمها النيوترونات. هذه متعادلة، ليس لها شحنة. انظري، ستضيء واحدة واحدة. هيا عدّي معي النيوترونات بصوت عال!",
+    {id:"nname", focus:"neutron", word:"نيوترونات", repeat:true, keepLabel:true,
+      say:()=>"وانظري إلى هذه الحبة الرمادية، اسمها نيوترون. نيوترون واحد. وكل الحبات الرمادية معا، اسمها نيوترونات! وهي متعادلة، ليس لها شحنة. قولي معي: نيوترون!"},
+    {id:"ncount", focus:"neutron", count:"neutron", word:"نيوترونات",
+      say:()=>"انظري، ستضيء النيوترونات واحدة واحدة. هيا عدّي معي بصوت عال!",
       ask:()=>"كم نيوترونا عندي؟",
       expectNum:()=>neutrons.length, q:"كم نيوتروناً مضيئاً؟", ans:()=>String(neutrons.length),
       ladder:[()=>"",()=>`عندي ${neutrons.length} نيوترونات!`], recount:true},
-    {id:"charge", focus:"proton", say:()=>"هممم، والآن تذكري: ما شحنة البروتونات؟",
+    {id:"charge", focus:"proton", word:"بروتونات", say:()=>"هممم، والآن تذكري: ما شحنة البروتونات؟",
       expect:/موجب|زايد|زائد|\+/, q:"ما شحنة البروتونات؟", ans:"موجبة",
       ladder:[()=>"انظري إلى العلامة على البروتون: زائد. ماذا تعني؟",()=>"هل شحنتها موجبة أم سالبة؟",()=>"شحنة البروتونات موجبة!"]},
-    {id:"inside", focus:"nucleus", say:()=>"بعدما عددنا معا، قولي لي: ماذا يوجد داخل النواة؟",
+    {id:"inside", focus:"revealPN", say:()=>"بعدما عددنا معا، قولي لي: ماذا يوجد داخل النواة؟",
       expectBoth:[/بروتون/,/نيوترون|نترون|نيترون/], expect:/بروتون.*(نيوترون|نترون|نيترون)|(نيوترون|نترون|نيترون).*بروتون/, q:"ماذا يوجد داخل النواة؟", ans:"البروتونات والنيوترونات",
       partial:()=>"صحيح! ومعها نوع آخر من الحبات. انظري داخل قلبي، ما اسمها؟",
       partialEnd:()=>"لا بأس! داخل النواة النوعان معا: البروتونات والنيوترونات!",
       reveal:true,
       ladder:[()=>"انظري داخل قلبي، ماذا ترين مكتوبا؟",()=>"هل داخل النواة البروتونات والنيوترونات، أم الإلكترونات؟",()=>"داخل النواة البروتونات والنيوترونات!"]},
-    {id:"elements", focus:"proton", caption:"كربون:  6 بروتونات", caption2:"أكسجين:  8 بروتونات",
+    {id:"elements", focus:"proton", caption:"كربون  6", caption2:"أكسجين  8",
       say:()=>"تعرفين شيئا؟ عدد البروتونات يختلف من ذرة لأخرى! أنا ذرة كربون، أعيش في الخشب وقلم الرصاص. ولي 6 بروتونات. سأتحول الآن إلى ذرة أكسجين، لنرى عدد بروتوناتها! انظري!",
       say2:()=>"ذرة الأكسجين، في الهواء الذي نتنفسه، لها 8 بروتونات! أيهما بروتوناتها أكثر: الكربون أم الأكسجين؟", element:8,
       expect:/[اأ]كسج|اكسيج|ثمان|8/, q:"أي ذرة لها بروتونات أكثر: الكربون (6) أم الأكسجين (8)؟", ans:"الأكسجين",
       ladder:[()=>"الكربون له 6 بروتونات، والأكسجين له 8. أيهما أكثر؟",()=>"الأكسجين له 8 بروتونات، أكثر من الكربون!"]},
-    {id:"electrons", focus:"electron", say:()=>"والآن، لنكتشف من يدور حولي! واو، انظري إلى هذه الحبات التي تدور بسرعة. اسمها الإلكترونات، وشحنتها سالبة. أين تدور الإلكترونات؟",
+    {id:"electrons", focus:"electron", word:"إلكترونات", say:()=>"والآن، لنكتشف من يدور حولي! واو، انظري إلى هذه الحبات التي تدور بسرعة. اسمها الإلكترونات، وشحنتها سالبة. أين تدور الإلكترونات؟",
       expect:/حول|خارج|مدار|مستوي|دوائر|برا|بره|تدور/, q:"أين تدور الإلكترونات؟", ans:"حول النواة",
       ok:()=>"صح! تدور حول النواة. قولي معي: الإلكترونات!",
       ladder:[()=>"انظري جيدا، هل تدور داخل قلبي أم حوله؟",()=>"تدور حول قلبي! واسمها الإلكترونات، قولي معي: الإلكترونات!"]},
-    {id:"ecount", focus:"electron", count:"electron",
+    {id:"ecount", focus:"electron", count:"electron", word:"إلكترونات",
       say:()=>"انظري إلى إلكتروناتي، ستضيء واحدة واحدة. عدّيها بصوت عال!",
       ask:()=>"كم إلكترونا عندي؟",
       expectNum:()=>electrons.length, q:"كم إلكتروناً مضيئاً؟", ans:()=>String(electrons.length),
       ladder:[()=>"قريبة! هيا نعدّها مرة أخرى ببطء.",()=>`عندي ${electrons.length} إلكترونات!`], recount:true},
-    {id:"neutral", focus:"electron", caption:"6 (+)  =  6 (−)   ←   مُتعادلة",
+    {id:"neutral", focus:"electron", caption:"مُتعادلة",
       say:()=>"يا سلام! عندي 6 بروتونات، و6 إلكترونات. العدد نفسه! لذلك أنا ذرة متعادلة.", auto:true},
     {id:"levels", focus:"orbit", say:()=>"والدوائر التي تدور فيها الإلكترونات، اسمها مستويات الطاقة. انظري، هذه دوائري!", auto:true},
-    {id:"attract", focus:"attract", caption:"(+)  و  (−)  بينهما تجاذب", say:()=>"انظري! النواة موجبة، والإلكترونات سالبة. لماذا لا تهرب إلكتروناتي مني؟ الموجب والسالب: هل بينهما تجاذب أم تنافر؟", confirm:()=>"بينهما تجاذب! الموجب يجذب السالب، لذلك تبقى إلكتروناتي قريبة مني!",
+    {id:"attract", focus:"attract", caption:"تجاذب", say:()=>"انظري! النواة موجبة، والإلكترونات سالبة. لماذا لا تهرب إلكتروناتي مني؟ الموجب والسالب: هل بينهما تجاذب أم تنافر؟", confirm:()=>"بينهما تجاذب! الموجب يجذب السالب، لذلك تبقى إلكتروناتي قريبة مني!",
       expect:/تجاذب|يتجاذب|يجذب|جذب|تجذب/, q:"هل بين الشحنة الموجبة والسالبة تجاذب أم تنافر؟", ans:"تجاذب",
       ladder:[()=>"فكري: لو كان بينهما تنافر، لهربت إلكتروناتي بعيدا! فهل بينهما تجاذب أم تنافر؟",()=>"بينهما تجاذب! الموجب يجذب السالب، لذلك تبقى إلكتروناتي قريبة مني."], last:true},
     {id:"facts", focus:"nucleus", say:()=>"تعرفين شيئا عجيبا؟ لو كبرت بحجم ملعب كرة، لكانت نواتي بحجم حبة حمص في وسطه! يعني نواتي في الحقيقة أصغر بكثير، لكني كبرتها لكِ. وأغلب وزني في قلبي الصغير، أما الإلكترونات، فخفيفة جدا!", auto:true},
@@ -1212,15 +1215,16 @@ async function runStep(){
   const st=J.steps[J.i]; if(!st) return;
   hideCaption(); J.repeatAsked=false; J.turns=0; J.unclear=0; J.tries=0; J.waitRepeat=false; J.got=new Set(); J.partials=0; J.pending=null; countType=null; pendingCount=null;
   if(st.focus) setFocusNow(st.focus); else if(!st.surprise) setFocusNow(null);
-  if(Z!==DEFAULT_Z&&!st.element) buildElement(DEFAULT_Z);
+  if(Z!==DEFAULT_Z&&!st.element){ await speakNow("والآن، سأعود إلى ذرة كربون!"); buildElement(DEFAULT_Z); showCaption("كربون",3500); await new Promise(z=>setTimeout(z,1500)); }
   if(st.surprise){ celebrating=true; surpriseAt=clock.getElapsedTime()+0.4; happyUntil=clock.getElapsedTime()+5; }
   if(st.bye){ sessionEnded=true; waveUntil=clock.getElapsedTime()+6; }
   [J.steps[J.i+1],J.steps[J.i+2]].forEach(n=>{ if(n) speechParts(n.say()).forEach(prefetch); });
-  if(st.caption) showCaption(st.caption,9000);
+  if(st.caption) showCaption(st.caption,9000); else if(st.word) showCaption(st.word,120000);
   await speakNow(st.say());
   if(st.count){ await doCount(st); }
   if(st.element){ buildElement(st.element); setFocusNow(st.focus); if(st.caption2) showCaption(st.caption2,15000); await new Promise(z=>setTimeout(z,1200)); await speakNow(st.say2()); }
   if(st.bye){ endingAt=clock.getElapsedTime()+2.5; nextGreetAddr=pick(ADDR); setTimeout(prepareGreeting,3000); }
+  if(st.repeat){ J.waitRepeat=true; }
   if(st.auto){ await nextStep(); }
 }
 async function nextStep(prefix){
@@ -1332,7 +1336,7 @@ async function onStudent(text){
       if(st.count&&k===0){ const num=numIn(text), exp=st.expectNum(); line=(num!=null&&Math.abs(num-exp)<=1)?"قريبة جدا! هيا نعدّها مرة أخرى ببطء.":"لا بأس، هيا نعدّها معا مرة أخرى ببطء."; }
       else if(L.length>1){ const base=line.replace(OPEN,""); line=k===0?(vv==="dontknow"?"لا بأس! سأساعدكِ. ":"فكرة جميلة، لكنها ليست هي. ")+base:base; }
       if(st.reveal&&k===0) setFocusNow("revealPN"); const ch=line.match(/هل (.+?) أم (.+?)[؟?]/);
-      const TERMS=["البروتونات والنيوترونات","النواة","الإلكترونات","الإلكترون","البروتونات","النيوترونات","موجبة","سالبة","متعادلة","تجاذب","تنافر","الكربون","الأكسجين"];
+      const TERMS=["موجبة","سالبة"];
       const term=x=>TERMS.find(w=>x.includes(w));
       if(ch&&term(ch[1])&&term(ch[2])) showCaption(term(ch[1])+"    |    "+term(ch[2]),20000);
       await speakNow(line);
