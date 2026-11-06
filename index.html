@@ -554,7 +554,7 @@ function targetPoint(out){
   if((focus==="revealN")&&neutrons[featured.n]) return neutrons[featured.n].getWorldPosition(out);
   if((focus==="revealP"||focus==="revealPN"||focus==="attract")&&protons[featured.p]) return protons[featured.p].getWorldPosition(out);
   if(focus==="nucleus") return body.getWorldPosition(out).add(new THREE.Vector3(0,-0.15,ATOM_R*0.6));
-  if((focus==="electron"||focus==="orbit")&&electrons[featured.e]) return electrons[featured.e].g.getWorldPosition(out);
+  if((focus==="electron"||focus==="orbit")&&electrons[featured.e]&&countType!=="electron") return electrons[featured.e].g.getWorldPosition(out);
   return null;
 }
 buildElement(DEFAULT_Z); applyTopic();
@@ -1154,6 +1154,10 @@ function buildSteps(){
       expect:/ذر/, q:"ما اسم الشخصية التي تتكلم؟", ans:"الذرة",
       ok:()=>"صح! أنا الذرة! قولي معي: الذرة!",
       ladder:[()=>"اسمي الذرة! قولي معي: الذرة!"]},
+    {id:"smallest", word:"الذرّة", say:()=>"تعرفين؟ أنا الذرة، أصغر جزء في المادة يحمل صفاتها! مثلا، ذرة الذهب تحمل صفات الذهب، وذرة الحديد تحمل صفات الحديد، وذرة الألمنيوم في علبة العصير تحمل صفات الألمنيوم! تذكري: الذرة هي أصغر جزء في المادة. إذن، ما أصغر جزء في المادة؟",
+      expect:/ذر/, q:"ما أصغر جزء في المادة يحمل صفاتها؟", ans:"الذرة",
+      confirm:()=>"الذرة هي أصغر جزء في المادة!",
+      ladder:[()=>"هل أصغر جزء في المادة الذرة أم الطاولة؟",()=>"الذرة هي أصغر جزء في المادة! قولي معي: الذرة!"]},
     {id:"heart", focus:"nucleus", say:()=>"انظري إلى وسطي! هنا قلبي الصغير. خمّني، ما اسم قلبي؟",
       expect:/نوا|نواه|نوات|نوى/, q:"ما اسم قلب الذرة الذي في وسطها؟", ans:"النواة",
       ok:()=>"صح! قلبي اسمه النواة! انظري، هنا في وسطي. قولي معي: النواة!",
@@ -1192,7 +1196,7 @@ function buildSteps(){
       say2:()=>"ذرة الأكسجين، في الهواء الذي نتنفسه، لها 8 بروتونات! أيهما بروتوناتها أكثر: الكربون أم الأكسجين؟", element:8,
       expect:/[اأ]كسج|اكسيج|ثمان|8/, q:"أي ذرة لها بروتونات أكثر: الكربون (6) أم الأكسجين (8)؟", ans:"الأكسجين",
       ladder:[()=>"الكربون له 6 بروتونات، والأكسجين له 8. أيهما أكثر؟",()=>"الأكسجين له 8 بروتونات، أكثر من الكربون!"]},
-    {id:"electrons", focus:"electron", keepLabel:true, say:()=>"والآن، لنكتشف من يدور حولي! واو، انظري إلى هذه الحبة الصغيرة التي تدور بسرعة، اسمها إلكترون. إلكترون واحد. وكل الحبات التي تدور معا، اسمها إلكترونات! وشحنتها سالبة. أين تدور الإلكترونات؟",
+    {id:"electrons", focus:"electron", keepLabel:true, word:"إلكترون", say:()=>"والآن، لنكتشف من يدور حولي! واو، انظري إلى هذه الحبة الصغيرة التي تدور بسرعة، اسمها إلكترون. إلكترون واحد. وكل الحبات التي تدور معا، اسمها إلكترونات! وشحنتها سالبة. أين تدور الإلكترونات؟",
       expect:/حول|خارج|مدار|مستوي|دوائر|برا|بره|تدور/, q:"أين تدور الإلكترونات؟", ans:"حول النواة",
       ok:()=>"صح! تدور حول النواة. قولي معي: الإلكترونات!",
       ladder:[()=>"انظري جيدا، هل تدور داخل قلبي أم حوله؟",()=>"تدور حول قلبي! واسمها الإلكترونات، قولي معي: الإلكترونات!"]},
@@ -1297,8 +1301,10 @@ async function onStudent(text){
       if(CONFUSED.test(n)){ await speakNow("انظري حولكِ، وقولي لي اسم شيء تشاهدينه، مثل الطاولة أو الكرسي!"); return; }
       if(/ضوء|صوت|نور|ظل|حلم|فكره|حب|فرح|خوف/.test(n)){ await speakNow("هذا ليس مصنوعا من ذرات، جربي شيئا تلمسينه بيدكِ!"); return; }
       if(DONTKNOW.test(n)||n.length<2){ await speakNow("انظري إلى يدكِ، أو إلى الطاولة أمامكِ! أعطيني شيئا."); return; }
+      if(/^(ا?م+|ه+م+|اه+|ااه+|يعني|بس|شي|طيب|ها+|اوك|اوه+|لحظه|استني|انتظري)$/.test(n)||n.length<3){ await speakNow("فكري، وانظري حولكِ، وقولي لي اسم شيء تشاهدينه!"); return; }
       const OBJ=[[/طاول|طالب/,"الطاولة",1],[/كرسي|كراسي/,"الكرسي",0],[/باب/,"الباب",0],[/لوح/,"اللوحة",1],[/نبت|زرع|شجر/,"النبتة",1],[/قلم|اقلام/,"القلم",0],[/كتاب|كتب|دفتر/,"الكتاب",0],[/جدار|حائط|جدر/,"الجدار",0],[/شباك|نافذ/,"النافذة",1],[/جوال|جوالي|موبايل|تلفون/,"الجوال",0],[/شنط|حقيب/,"الحقيبة",1],[/ماء|موي/,"الماء",0],[/ملابس|ثوب|فستان|عبايه|مريول/,"الملابس",1],[/يد|يدي|اصبع/,"اليد",1],[/شاش|كمبيوتر|لابتوب/,"الشاشة",1],[/صندوق/,"الصندوق",0],[/هواء|هوا/,"الهواء",0],[/ارض|ارضيه/,"الأرض",1],[/سقف/,"السقف",0],[/كاس|كوب/,"الكوب",0],[/اكل|طعام|تفاح|موز/,"الطعام",0]];
       const hit=OBJ.find(([re])=>re.test(n));
+      if(!hit){ const vv=await judge({q:"اذكري اسم شيء مادي ملموس موجود حولك",ans:"أي شيء مادي ملموس مثل طاولة أو قلم أو باب"},text); if(vv!=="correct"){ await speakNow("فكري، وانظري حولكِ، وقولي لي اسم شيء تشاهدينه!"); return; } }
       const line=hit?`صحيح! ${hit[1]} ${hit[2]?"مصنوعة":"مصنوع"} من ذرات!`:"صحيح! كل شيء تلمسينه مصنوع من ذرات!";
       happyUntil=clock.getElapsedTime()+2.5; await nextStep(line); return; }
     if(st.repeatOnly){ happyUntil=clock.getElapsedTime()+2.5; await nextStep(pick(PRAISE_W)); return; }
@@ -1309,7 +1315,7 @@ async function onStudent(text){
       const tre=termRe(word), okRep=tre?tre.test(said):said.includes(key);
       if(key&&!okRep&&!J.repeatAsked&&!DONTKNOW.test(said)){ J.repeatAsked=true; await speakNow("قولي معي مرة أخرى: "+word.trim()+"!"); return; }
       J.waitRepeat=false; J.repeatAsked=false; happyUntil=clock.getElapsedTime()+2.5;
-      await nextStep(okRep?pick(["أحسنتِ!","رائع!","ممتاز!","برافو عليكِ!"]):"لا بأس، هيا نكمل!"); return; }
+      await nextStep(pick(["أحسنتِ!","رائع!","ممتاز!","برافو عليكِ!"])); return; }
     if(SOCIAL.test(norm(text))&&!J.waitRepeat){ const a=await shortAnswer(text); await speakNow(a); if(!st.closing&&!st.any) await speakNow("سؤالي كان: "+(st.ask?st.ask():st.say().split(/[.!]\s/).pop())); else if(st.closing) await speakNow("هل لديكِ سؤال آخر، أم نقول مع السلامة؟"); return; }
     if(st.closing){
       const n=norm(text), W2=n.split(" ");
@@ -1325,6 +1331,7 @@ async function onStudent(text){
     }
     const CONF=/^(ايش|ايه|وش|شو|ماذا|ها|هاه|عيدي|اعيدي|ما فهمت|مافهمت|كيف|نعم|ايش تقولين|وش تقولين)$/;
     if((CONF.test(norm(text))||CONFUSED.test(norm(text)))&&!st.closing){ await speakNow("سؤالي هو: "+(st.ask?st.ask():st.say().split(/[.!]\s/).pop())); return; }
+    if((st.id==="heart"||st.surprise)&&(TERM_RE.بروت.test(norm(text))||TERM_RE.نيوت.test(norm(text)))){ happyUntil=clock.getElapsedTime()+2; await speakNow("صحيح! في وسطي بروتونات ونيوترونات! وكلها معا اسمها النواة! قولي معي: النواة!"); J.waitRepeat=true; return; }
     const v=await judge(st,text);
     if(st.surprise||st.id==="recap2"||st.id==="recap3"){ if(v==="correct"){ happyUntil=clock.getElapsedTime()+2.5; await nextStep(pick(PRAISE_W)); } else { encourageUntil=clock.getElapsedTime()+3; await speakNow(st.soft()); J.waitRepeat=true; } return; }
     if(v==="correct"){
