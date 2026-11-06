@@ -305,7 +305,7 @@ const particles=new THREE.Group(); body.add(particles);
 const atomFace=makeFace(ATOM_R,nucSkin,0x5a2a1a); body.add(atomFace.g);
 const hands=[makeHand(),makeHand()];
 const shells=new THREE.Group(); atom.add(shells);
-let protons=[], neutrons=[], electrons=[], rings=[], buildT0=-10;
+let protons=[], neutrons=[], electrons=[], rings=[], buildT0=-10, shellSpheres=[];
 const SHELL_R=[1.4,1.95,2.45], SHELL_SPEED=[1.0,0.7,0.5];
 function clearGroup(g){ while(g.children.length){ const c=g.children.pop(); c.traverse(o=>{ if(o.geometry) o.geometry.dispose(); }); } }
 function buildElement(z){
@@ -324,22 +324,32 @@ function buildElement(z){
     particles.add(m); (isP?protons:neutrons).push(m);
   }
   let left=Z; const caps=[2,8,8];
-  for(let s=0;s<3&&left>0;s++){
-    const n=Math.min(caps[s],left); left-=n; const R=SHELL_R[s];
-    const g=new THREE.Group(); shells.add(g);
-    const coreM=new THREE.MeshBasicMaterial({color:0x7ff0ff,transparent:true,opacity:0,blending:THREE.AdditiveBlending,depthWrite:false});
-    const glowM=new THREE.MeshBasicMaterial({color:0x3fd4ff,transparent:true,opacity:0,blending:THREE.AdditiveBlending,depthWrite:false});
-    g.add(new THREE.Mesh(new THREE.TorusGeometry(R,0.012,8,240),coreM)); g.add(new THREE.Mesh(new THREE.TorusGeometry(R,0.055,8,240),glowM));
-    const num=symbol(String(s+1),"#7ff0ff"); num.scale.set(0.26,0.26,1); num.position.set(R*Math.cos(0.8),R*Math.sin(0.8),0); g.add(num);
-    rings.push({g,coreM,glowM,num,R,appear:0.9+s*0.45});
-    for(let e=0;e<n;e++){
-      const eg=new THREE.Group();
-      const c=new THREE.Mesh(new THREE.SphereGeometry(0.08,20,20),new THREE.MeshPhysicalMaterial({color:0xd8fbff,emissive:0x3fd4ff,emissiveIntensity:0.6,roughness:0.2,clearcoat:1,transparent:true,opacity:0}));
-      const gl=glow(0x6ee7f9,0.6); gl.material.opacity=0;
-      const sym=symbol("−","#6ee7f9"); sym.scale.set(0.22,0.22,1); sym.material.depthTest=true;
-      eg.add(c); eg.add(gl); eg.add(sym); g.add(eg);
-      const trail=[]; for(let k=0;k<7;k++){ const ts=glow(0x6ee7f9,0.32*(1-k/8)); ts.material.opacity=0; g.add(ts); trail.push(ts); }
-      electrons.push({g:eg,c,gl,sym,trail,R,speed:SHELL_SPEED[s],off:e*Math.PI*2/n+s*0.9,ring:s});
+  shellSpheres.forEach(m=>{ shells.remove(m); m.geometry.dispose(); }); shellSpheres=[];
+  for(let sh=0;sh<3&&left>0;sh++){
+    const n=Math.min(caps[sh],left); left-=n; const R=SHELL_R[sh];
+    // غلاف شفاف للمستوى يظهر عند شرح مستويات الطاقة
+    const sph=new THREE.Mesh(new THREE.SphereGeometry(R,48,32),new THREE.MeshBasicMaterial({color:0x6ee7f9,transparent:true,opacity:0,depthWrite:false,blending:THREE.AdditiveBlending,side:THREE.DoubleSide}));
+    shells.add(sph); shellSpheres.push(sph);
+    // كل مستوى: مدارات بزوايا مختلفة تمر أمام النواة وخلفها (إلكترونان لكل مدار)
+    const orbits=Math.max(1,Math.ceil(n/2)); let placed=0;
+    for(let k=0;k<orbits;k++){
+      const g=new THREE.Group(); shells.add(g);
+      g.rotation.set(1.15+(sh===0?0.25:0), k*Math.PI/orbits+sh*0.55, (k%2?0.35:-0.35)+sh*0.2);
+      const coreM=new THREE.MeshBasicMaterial({color:0x7ff0ff,transparent:true,opacity:0,blending:THREE.AdditiveBlending,depthWrite:false});
+      const glowM=new THREE.MeshBasicMaterial({color:0x3fd4ff,transparent:true,opacity:0,blending:THREE.AdditiveBlending,depthWrite:false});
+      g.add(new THREE.Mesh(new THREE.TorusGeometry(R,0.012,8,240),coreM)); g.add(new THREE.Mesh(new THREE.TorusGeometry(R,0.05,8,240),glowM));
+      const num=symbol(String(sh+1),"#7ff0ff"); num.scale.set(0.26,0.26,1); num.position.set(R*Math.cos(0.8),R*Math.sin(0.8),0); if(k===0) g.add(num);
+      const ri=rings.length; rings.push({g,coreM,glowM,num,R,shell:sh,appear:0.9+sh*0.45+k*0.15,first:k===0});
+      const m=Math.min(2,n-placed); placed+=m;
+      for(let e=0;e<m;e++){
+        const eg=new THREE.Group();
+        const c=new THREE.Mesh(new THREE.SphereGeometry(0.08,20,20),new THREE.MeshPhysicalMaterial({color:0xd8fbff,emissive:0x3fd4ff,emissiveIntensity:0.6,roughness:0.2,clearcoat:1,transparent:true,opacity:0}));
+        const gl=glow(0x6ee7f9,0.6); gl.material.opacity=0;
+        const sym=symbol("−","#6ee7f9"); sym.scale.set(0.22,0.22,1); sym.material.depthTest=true;
+        eg.add(c); eg.add(gl); eg.add(sym); g.add(eg);
+        const trail=[]; for(let q=0;q<7;q++){ const ts=glow(0x6ee7f9,0.32*(1-q/8)); ts.material.opacity=0; g.add(ts); trail.push(ts); }
+        electrons.push({g:eg,c,gl,sym,trail,R,speed:SHELL_SPEED[sh],off:e*Math.PI+k*0.9,ring:ri});
+      }
     }
   }
   featured.p=0; featured.n=0; featured.e=electrons.length-1;
@@ -432,6 +442,9 @@ function drawPill(L,txt,size,stroke){
   g.fillStyle="#ffffff"; g.fillText(txt,L.c.width/2,L.c.height/2+2); L.tex.needsUpdate=true;
 }
 const label=textSprite(512,128); label.sp.scale.set(1.5,0.375,1);
+const caption=textSprite(1024,160); caption.sp.scale.set(3.4,0.53,1); let captionText="", captionUntil=0;
+function showCaption(t,ms){ captionText=t; captionUntil=performance.now()+(ms||8000); }
+function hideCaption(){ captionUntil=0; }
 const nameTag=textSprite(1024,160); nameTag.sp.scale.set(3.0,0.47,1);
 const LABELS={root:"الجذور",stem:"الساق",leaf:"الأوراق",flower:"الزهرة",seed:"البذور",nucleus:"النَّواة",proton:"بروتون  +",neutron:"نيوترون  0",electron:"إلكترون  −",orbit:"مستويات الطاقة"};
 let studentName="", surpriseAt=-10, goneFade=0, waveUntil=0;
@@ -582,7 +595,7 @@ function loop(){
     const bt=t-buildT0, pop=Math.min(1,bt/0.8), popE=pop<1?1-Math.pow(1-pop,3)*(1-Math.sin(pop*Math.PI)*0.4):1;
     atom.scale.setScalar(Math.max(0.001,popE*(shells.children.length>2?0.92:1.05)));
     atom.position.y=0.12+(happy?Math.abs(Math.sin(t*8))*0.15:Math.sin(t*1.1)*0.05);
-    shells.rotation.x=-1.05+Math.sin(t*0.3)*0.08; shells.rotation.y=Math.sin(t*0.17)*0.15;
+    shells.rotation.y=t*0.12; shells.rotation.x=Math.sin(t*0.3)*0.12;
     const breathe=1+Math.sin(t*2.2)*0.012;
     body.scale.setScalar(breathe*(1+Math.max(0,(W.p+W.n)/2-1)*0.08));
     nucSkin.opacity=1-W.open*0.78; nucSkin.depthWrite=nucSkin.opacity>0.6; nucSphere.renderOrder=nucSkin.opacity<0.9?2:0;
@@ -607,11 +620,12 @@ function loop(){
       r.g.scale.setScalar(0.2+0.8*ek); const base=(focus==="orbit"?1:Math.min(1,W.o))*(covered.has('e')?1.15:1);
       r.coreM.opacity=ek*0.9*base; r.glowM.opacity=ek*0.16*base*(focus==="orbit"?2:1);
       r.num.material.opacity=ease(r.num.material.opacity,focus==="orbit"?1:0,0.08); });
+    shellSpheres.forEach((m,i)=>{ m.material.opacity=ease(m.material.opacity,focus==="orbit"?0.07+Math.sin(t*2+i)*0.02:0,0.05); });
     const eSpeed=1-Math.max(0,W.e-1)*0.5;
     electrons.forEach((x,i)=>{
       const ra=rings[x.ring]; const show=Math.max(0,Math.min(1,(bt-ra.appear-0.5)/0.5));
       const a=t*x.speed*eSpeed+x.off; x.g.position.set(Math.cos(a)*x.R,Math.sin(a)*x.R,0);
-      const counted=countType==="electron"&&i<countN&&(t-countStart)/0.7>i;
+      const counted=countType==="electron"&&i<countN&&(t-countStart)/1.3>=i;
       const big=counted?1.7:(((focus==="electron"||focus==="orbit")&&i===featured.e&&countType!=="electron")?1+W.point*0.9:1);
       x.c.material.opacity=Math.min(1,W.e)*show; x.gl.material.opacity=Math.min(1,W.e)*0.85*show;
       const sc=0.6*(1+Math.max(0,W.e-1)*0.6)*big; x.gl.scale.set(sc,sc,1); x.c.scale.setScalar(big);
@@ -643,6 +657,10 @@ function loop(){
   faceBehavior(F,headHolder,t,hasT,happy);
   beam.material.opacity=hasT?0.4*W.point:0; tip.material.opacity=hasT?0.7*W.point*(0.7+Math.sin(t*7)*0.3):0;
 
+  // نص مساعد أسفل الذرة
+  const capOn=performance.now()<captionUntil&&!sessionEnded;
+  if(capOn) drawPill(caption,captionText,72,"rgba(110,231,249,.95)");
+  caption.sp.position.set(0,-1.55,0.6); caption.sp.material.opacity=ease(caption.sp.material.opacity,capOn?1:0,0.12);
   // اللافتة
   drawPill(label,focus?LABELS[focus]:"",64,"rgba(110,231,249,.9)");
   if(hasT) label.sp.position.copy(tp).add(tmp.set(0,0.45,0.25));
@@ -690,9 +708,10 @@ function loop(){
   floor.position.y=topic==="plant"?-2.1:-1.75; ring.position.y=floor.position.y+0.03;
   floor.material.opacity=0.55+Math.sin(t*1.2)*0.08;
   const ready=(!!rec||azRunning||oaiListening)&&mode==="idle"&&!J.busy;
-  const rt=mode==="hearing"?.8:mode==="thinking"?.5:ready?.28+Math.sin(t*2.5)*0.08:0;
-  ring.material.opacity=ease(ring.material.opacity,rt,0.1); ring.material.color.setHex(mode==="thinking"?0xffd166:0x6ee7f9);
-  ring.scale.setScalar(mode==="hearing"?1+Math.sin(t*4)*0.05:1);
+  const rt=mode==="hearing"?.9:mode==="thinking"?.55:ready?.35+Math.sin(t*3)*0.15:0;
+  ring.material.opacity=ease(ring.material.opacity,rt,0.12); ring.material.color.setHex(mode==="thinking"?0xc4b5ff:mode==="hearing"?0x9fe8ff:0x5fb8ff);
+  ring.scale.setScalar(mode==="hearing"?1+Math.min(0.35,micLevel*4):ready?1+Math.sin(t*3)*0.04:1);
+  ring.rotation.z=mode==="thinking"?t*1.5:0;
   renderer.render(scene,camera);
 }
 function setBeam(a,b){ beamGeo.attributes.position.setXYZ(0,a.x,a.y,a.z); beamGeo.attributes.position.setXYZ(1,b.x,b.y,b.z); beamGeo.attributes.position.needsUpdate=true; beam.computeLineDistances(); tip.position.copy(b); }
@@ -1069,8 +1088,9 @@ function numIn(t){ const n=norm(t); const d=n.match(/\d+/); if(d) return +d[0]; 
 // "قولي معي" فقط مع: الذرة، النواة، الإلكترونات
 function buildSteps(){
   return [
-    {id:"greet", say:()=>`مرحبا ${pick(ADDR)}! أنا الذرة. عندي سر عجيب، عنكِ أنتِ! هل تريدين أن تعرفيه؟`, any:true},
-    {id:"secret", say:()=>"سري هو: جسمكِ وكل شيء حولكِ مصنوع من ذرات مثلي، حتى يدكِ التي تحركينها الآن! وأنا اسمي الذرة. ما اسمي؟",
+    {id:"greet", say:()=>`مرحبا ${pick(ADDR)}! أنا الذرة. أنا صغيرة جدا جدا، لا تستطيع عينكِ أن تراني، لكني اليوم كبرت من أجلكِ حتى تريني وتتعرفي علي! وعندي سر عجيب، عنكِ أنتِ! هل تريدين أن تعرفيه؟`, any:true},
+    {id:"around", say:()=>"سري هو: جسمكِ وكل شيء حولكِ مصنوع من ذرات مثلي! حتى الطاولة والكرسي، وحتى يدكِ! انظري حولكِ، وأعطيني شيئا مصنوعا من ذرات!", around:true},
+    {id:"secret", say:()=>"وأنا اسمي الذرة. ما اسمي؟",
       expect:/ذر/, q:"ما اسم الشخصية التي تتكلم؟", ans:"الذرة",
       ok:()=>"نعم! أنا الذرة! قولي معي: الذرة!",
       ladder:[()=>"اسمي الذرة! قولي معي: الذرة!"]},
@@ -1108,11 +1128,18 @@ function buildSteps(){
       expect:/حول|خارج|مدار|مستوي|دوائر|برا|بره|تدور/, q:"أين تدور الإلكترونات؟", ans:"حول النواة",
       ok:()=>"نعم! تدور حول النواة. واسمها الإلكترونات، قولي معي: الإلكترونات!",
       ladder:[()=>"انظري جيدا، هل تدور داخل قلبي أم حوله؟",()=>"تدور حول قلبي! واسمها الإلكترونات، قولي معي: الإلكترونات!"]},
+    {id:"ecount", focus:"electron", count:"electron",
+      say:()=>"انظري إلى إلكتروناتي وهي تضيء واحدة واحدة، وعدّيها بصوت عال.",
+      ask:()=>"كم إلكترونا عندي؟",
+      expectNum:()=>electrons.length, q:"كم إلكتروناً مضيئاً؟", ans:()=>String(electrons.length),
+      ladder:[()=>"قريبة! هيا نعدّها مرة أخرى ببطء.",()=>`عندي ${electrons.length} إلكترونات!`], recount:true},
+    {id:"neutral", focus:"electron", caption:"6 (+)  =  6 (−)   ←   مُتعادلة",
+      say:()=>"والإلكترونات إشارتها سالبة. عندي 6 بروتونات و6 إلكترونات، العدد نفسه! لذلك أنا ذرة متعادلة.", auto:true},
     {id:"levels", focus:"orbit", say:()=>"والدوائر التي تدور فيها الإلكترونات اسمها مستويات الطاقة. هذه دوائري المضيئة!", auto:true},
     {id:"attract", focus:"electron", say:()=>"النواة موجبة، والإلكترونات سالبة، والموجب يجذب السالب، لذلك تبقى قريبة مني ولا تهرب! هل الموجب والسالب يتجاذبان أم يتنافران؟",
       expect:/تجاذب|يتجاذب|يجذب|جذب|تجذب/, q:"هل الشحنة الموجبة والسالبة يتجاذبان أم يتنافران؟", ans:"يتجاذبان",
       ladder:[()=>"تذكري: لذلك تبقى الإلكترونات قريبة مني ولا تهرب، هل يتجاذبان أم يتنافران؟",()=>"يتجاذبان!"], last:true},
-    {id:"facts", focus:"nucleus", say:()=>"هل تعلمين؟ لو كبرت بحجم ملعب كرة، لكانت نواتي بحجم حبة حمص في وسطه! وأغلب وزني في قلبي الصغير، أما الإلكترونات فخفيفة جدا!", auto:true},
+    {id:"facts", focus:"nucleus", say:()=>"هل تعلمين؟ لو كبرت بحجم ملعب كرة، لكانت نواتي بحجم حبة حمص في وسطه! يعني نواتي في الحقيقة أصغر بكثير مما ترينها الآن، لكني كبرتها لكِ حتى تريها. وأغلب وزني في قلبي الصغير، أما الإلكترونات فخفيفة جدا!", auto:true},
     {id:"surprise", say:()=>`مفاجأة! أنتِ الآن عالمة الذرة الصغيرة! تعالي نثبت ذلك! تحدي العالمة: ما اسم قلبي؟`, surprise:true,
       expect:/نوا/, q:"ما اسم قلب الذرة؟", ans:"النواة", soft:()=>"قريبة! تذكري، اسم قلبي النواة! قولي معي: النواة!"},
     {id:"recap2", focus:"electron", say:()=>"ومن يدور حولي؟", expect:/[اإ]لكترون|الكترون/, q:"من يدور حول نواة الذرة؟", ans:"الإلكترونات", soft:()=>"قريبة! تذكري، تدور حولي الإلكترونات! قولي معي: الإلكترونات!"},
@@ -1127,12 +1154,13 @@ let speechDoneCb=null;
 function setFocusNow(p){ pendingFocus=p; focusSince=-10; }
 async function runStep(){
   const st=J.steps[J.i]; if(!st) return;
-  J.tries=0; J.waitRepeat=false; J.got=new Set(); J.partials=0; J.pending=null; countType=null; pendingCount=null;
+  hideCaption(); J.tries=0; J.waitRepeat=false; J.got=new Set(); J.partials=0; J.pending=null; countType=null; pendingCount=null;
   if(st.focus) setFocusNow(st.focus); else if(!st.surprise) setFocusNow(null);
   if(Z!==DEFAULT_Z&&!st.element) buildElement(DEFAULT_Z);
   if(st.surprise){ celebrating=true; surpriseAt=clock.getElapsedTime()+0.4; happyUntil=clock.getElapsedTime()+5; }
   if(st.bye){ sessionEnded=true; waveUntil=clock.getElapsedTime()+6; }
   [J.steps[J.i+1],J.steps[J.i+2]].forEach(n=>{ if(n) speechParts(n.say()).forEach(prefetch); });
+  if(st.caption) showCaption(st.caption,9000);
   await speakNow(st.say());
   if(st.count){ await doCount(st); }
   if(st.element){ buildElement(st.element); setFocusNow(st.focus); await new Promise(z=>setTimeout(z,1200)); await speakNow(st.say2()); }
@@ -1187,20 +1215,27 @@ async function onStudent(text){
   if(J.busy){ J.pending=text; log("queued (busy): "+text); return; } const st=J.steps[J.i]; if(!st||sessionEnded&&!st.bye) return;
   if(sessionEnded&&!st.bye){ log("dropped (session ended): "+text); return; }
   if(similarToOwn(text)&&!(st.expect&&st.expect.test(norm(text)))&&!J.waitRepeat&&!st.repeatOnly&&!/قولي معي/.test(lastSpokenText)){ log("ignored echo: "+text); return; }
-  J.busy=true; mode="thinking"; log("student: "+text);
+  J.busy=true; mode="thinking"; log("student: "+text); hideCaption();
   try{
     if(st.any){ await nextStep(); return; }
+    if(st.around){
+      const n=norm(text);
+      if(/ضوء|صوت|نور|ظل|حلم|فكره|حب|فرح|خوف/.test(n)){ await speakNow("هذا ليس مصنوعا من ذرات، جربي شيئا تلمسينه بيدكِ!"); return; }
+      if(DONTKNOW.test(n)||n.length<2){ await speakNow("انظري إلى يدكِ، أو إلى الطاولة أمامكِ! أعطيني شيئا."); return; }
+      const thing=strip(text).replace(/[.!؟?،]/g,"").split(/\s+/).slice(0,3).join(" ");
+      happyUntil=clock.getElapsedTime()+2.5; await nextStep("صحيح! "+thing+" مصنوع من ذرات!"); return; }
     if(st.repeatOnly){ happyUntil=clock.getElapsedTime()+2.5; await nextStep(pick(PRAISE_W)); return; }
     if(st.id==="secret"&&/^(نعم|ايوه|ايوا|اي|اوكي|صح|طيب)$/.test(norm(text))){ await speakNow("إذن قولي لي: ما اسمي؟"); return; }
     if(J.waitRepeat){ J.waitRepeat=false; happyUntil=clock.getElapsedTime()+2.5; await nextStep(pick(PRAISE_W)); return; }
     if(SOCIAL.test(norm(text))&&!J.waitRepeat){ const a=await shortAnswer(text); await speakNow(a); if(!st.closing&&!st.any) await speakNow("سؤالي كان: "+(st.ask?st.ask():st.say().split(/[.!]\s/).pop())); else if(st.closing) await speakNow("هل لديكِ سؤال آخر، أم أودّعكِ؟"); return; }
     if(st.closing){
-      const n=norm(text);
-      const W2=n.split(" "); const ENDW=["لا","ننهي","نهي","خلاص","يكفي","بس","انتهيت","ودعيني","باي","سلامه","السلامه","شكرا"];
-      if(W2.some(w=>ENDW.includes(w))&&!/[؟?]/.test(text)&&W2.length<=4){ await nextStep(); return; }
-      const v=/[؟?]|ليش|لماذا|كيف|ماذا|ما |هل |وش|ايش|متى|كم/.test(n)?"question":await judge({q:"هل لديك سؤال أم ننهي الرحلة؟",ans:"سؤال أو إنهاء"},text);
-      if(v==="question"&&J.qCount<4){ J.qCount++; const a=await shortAnswer(text); await speakNow(a+" هل لديكِ سؤال آخر، أم أودّعكِ؟"); return; }
-      await nextStep(); return;
+      const n=norm(text), W2=n.split(" ");
+      const BYE=/(^| )(لا|لاء|خلاص|يكفي|انتهيت|ودعيني|اودعك|وداعا|باي|سلام|السلامه)( |$)|الى اللقاء|مع السلامه|لا شكرا/;
+      if(BYE.test(n)&&W2.length<=5&&!/[؟?]/.test(text)){ await nextStep(); return; }
+      const v=await judge({q:"هل لديك سؤال أم أودعك؟",ans:"سؤال أو وداع"},text);
+      if(v==="unclear"){ await speakNow("لم أسمعكِ جيدا يا جميلتي، هل تعيدين؟"); return; }
+      if(v==="end"){ await nextStep(); return; }
+      const a=await shortAnswer(text); await speakNow(a+" هل لديكِ سؤال آخر، أم أودّعكِ؟"); return;
     }
     const CONF=/^(ايش|ايه|وش|شو|ماذا|ها|هاه|عيدي|اعيدي|ما فهمت|مافهمت|كيف|نعم|ايش تقولين|وش تقولين)$/;
     if(CONF.test(norm(text))&&!st.closing){ await speakNow("سؤالي هو: "+(st.ask?st.ask():st.say().split(/[.!]\s/).pop())); return; }
@@ -1220,7 +1255,7 @@ async function onStudent(text){
     // خطأ أو لا أعرف: تدرّج في المساعدة
     encourageUntil=clock.getElapsedTime()+3;
     const L=st.ladder||[]; const k=J.tries++;
-    if(k<L.length){ const line=L[k](); await speakNow(line);
+    if(k<L.length){ const line=L[k](); const ch=line.match(/هل (.+?) أم (.+?)[؟?]/); if(ch) showCaption(ch[1].replace(/^(اسم قلبي|داخل النواة|شحنتها|النواة|هي|تدور)\s*/,"").replace(/[،,]\s*$/,"")+"    |    "+ch[2],20000); await speakNow(line);
       if(/قولي معي/.test(line)){ J.waitRepeat=true; return; }
       if(st.recount&&k===0){ await doCount(st); return; }
       if(k===L.length-1){ await nextStep(); }
@@ -1231,7 +1266,7 @@ async function onStudent(text){
 }
 const COUNT_DT=1.3;
 async function doCount(st){
-  const n=st.count==="neutron"?neutrons.length:protons.length;
+  const n=st.count==="neutron"?neutrons.length:st.count==="electron"?electrons.length:protons.length;
   setFocusNow(st.focus); await new Promise(z=>setTimeout(z,500));
   countType=st.count; countN=n; countStart=clock.getElapsedTime(); pendingCount=null;
   await new Promise(z=>setTimeout(z,(n*COUNT_DT+0.8)*1000));
@@ -1246,7 +1281,7 @@ function journeySilence(stage){
 }
 
 // تنبيه عند صمت الطالبة
-let silenceStage=0, lastHeardMs=0, lastVoiceMs=0, micMon=null;
+let silenceStage=0, lastHeardMs=0, lastVoiceMs=0, micMon=null, micLevel=0;
 let oaiListening=false;
 const RT={pc:null,dc:null,track:null,on:false,tries:0,startedAt:0};
 async function startRealtimeSTT(stream){
@@ -1309,7 +1344,7 @@ async function startMicMonitor(){
     initAudio(); const src=audioCtx.createMediaStreamSource(stream); const an=audioCtx.createAnalyser(); an.fftSize=1024; src.connect(an);
     const buf=new Uint8Array(an.fftSize); micMon={an,buf,stream};
     setInterval(()=>{ an.getByteTimeDomainData(buf); let s2=0; for(let i=0;i<buf.length;i++){ const v=(buf[i]-128)/128; s2+=v*v; }
-      const rms=Math.sqrt(s2/buf.length); if(rms>0.04&&mode!=="speaking") lastVoiceMs=performance.now(); vadTick(stream,rms); },100);
+      const rms=Math.sqrt(s2/buf.length); micLevel=micLevel*0.6+rms*0.4; if(rms>0.04&&mode!=="speaking") lastVoiceMs=performance.now(); vadTick(stream,rms); },100);
     log("mic monitor: on"); if(OPENAI) startRealtimeSTT(stream); }catch(e){ log("mic monitor failed: "+e.message); }
 }
 setInterval(()=>{
