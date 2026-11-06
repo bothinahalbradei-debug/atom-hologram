@@ -1245,7 +1245,6 @@ async function runStep(){
 }
 async function nextStep(prefix){
   J.i++;
-  { const si=J.steps.findIndex(x=>x.surprise); if(si>0&&J.i<si&&(performance.now()-sessionStartMs)/60000>10){ log("time: 10 minutes, going to the surprise"); J.i=si; } }
   const st=J.steps[J.i];
   if(st&&st.last===undefined&&J.steps[J.i-1]&&J.steps[J.i-1].last) J.missionsDoneAt=performance.now();
   // بعد 5 دقائق والمهمات منتهية: مباشرة إلى المفاجأة
@@ -1350,7 +1349,6 @@ async function onStudent(text){
       happyUntil=clock.getElapsedTime()+1.5; await speakNow(st.partial()); return; }
     if(v==="unclear"&&(J.unclear=(J.unclear||0)+1)<2){ await speakNow(`لم أسمعكِ جيدا ${pick(ADDR)}. سؤالي هو: `+(st.ask?st.ask():st.say().split(/[.!]\s/).pop())); return; }
     if(v==="question"){ const a=await shortAnswer(text); await speakNow(a); await speakNow("سؤالي كان: "+(st.ask?st.ask():st.say().split(/[.!]\s/).pop())); return; }
-    if(v==="end"){ J.i=J.steps.findIndex(x=>x.surprise)-1; await nextStep(); return; }
     const vv=(v==="unclear"||v==="question"||v==="end")?"dontknow":v;
     // خطأ أو لا أعرف: تدرّج في المساعدة
     encourageUntil=clock.getElapsedTime()+3;
