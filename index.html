@@ -349,7 +349,7 @@ function buildElement(z){
         const eg=new THREE.Group();
         const c=new THREE.Mesh(new THREE.SphereGeometry(0.085,28,28),new THREE.MeshPhysicalMaterial({color:0x8fe3ff,emissive:0x1f8fb3,emissiveIntensity:0.35,metalness:0.1,roughness:0.12,clearcoat:1,clearcoatRoughness:0.05,transparent:true,opacity:0}));
         const gl=glow(0x6ee7f9,0.45); gl.material.opacity=0;
-        const sym=symbol("−","#6ee7f9"); sym.scale.set(0.22,0.22,1); sym.material.depthTest=true;
+        const sym=symbol("−","#ffffff"); sym.scale.set(0.2,0.2,1); sym.material.depthTest=false; sym.renderOrder=12;
         eg.add(c); eg.add(gl); eg.add(sym); g.add(eg);
         const trail=[]; for(let q=0;q<7;q++){ const ts=glow(0x6ee7f9,0.32*(1-q/8)); ts.material.opacity=0; g.add(ts); trail.push(ts); }
         electrons.push({g:eg,c,gl,sym,trail,R,speed:SHELL_SPEED[sh],off:e*Math.PI+k*0.9,ring:ri});
@@ -452,7 +452,15 @@ function hideCaption(){ captionUntil=0; }
 const nameTag=textSprite(1024,160); nameTag.sp.scale.set(3.0,0.47,1);
 const revealPos=[new THREE.Vector3(),new THREE.Vector3()];
 const label2=textSprite(512,128); label2.sp.scale.set(1.5,0.375,1);
-const LABELS={root:"الجذور",stem:"الساق",leaf:"الأوراق",flower:"الزهرة",seed:"البذور",nucleus:"النَّواة",proton:"بروتون  +",neutron:"نيوترون  0",revealN:"نيوترون 0 مُتعادل",revealP:"بروتون + مُوجب",revealPN:"بروتون + مُوجب",electron:"إلكترون  −",orbit:"مستويات الطاقة"};
+// مشهد الجذب: سهمان متقابلان وخط ينبض بين البروتون والإلكترون
+const attG=new THREE.Group(); scene.add(attG);
+const attLineGeo=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),new THREE.Vector3()]);
+const attLine=new THREE.Line(attLineGeo,new THREE.LineDashedMaterial({color:0xffe08a,dashSize:0.07,gapSize:0.05,transparent:true,opacity:0,depthTest:false})); attLine.renderOrder=11; attG.add(attLine);
+const arrowM=new THREE.MeshBasicMaterial({color:0xffe08a,transparent:true,opacity:0,depthTest:false});
+const arrows=[new THREE.Mesh(new THREE.ConeGeometry(0.07,0.2,16),arrowM),new THREE.Mesh(new THREE.ConeGeometry(0.07,0.2,16),arrowM)];
+arrows.forEach(a=>{ a.renderOrder=11; attG.add(a); });
+const UP=new THREE.Vector3(0,1,0); let attPick=-1;
+const LABELS={root:"الجذور",stem:"الساق",leaf:"الأوراق",flower:"الزهرة",seed:"البذور",nucleus:"النَّواة",proton:"بروتون  +",neutron:"نيوترون  0",attract:"بروتون + مُوجب",revealN:"نيوترون 0 مُتعادل",revealP:"بروتون + مُوجب",revealPN:"بروتون + مُوجب",electron:"إلكترون  −",orbit:"مستويات الطاقة"};
 let studentName="", surpriseAt=-10, goneFade=0, waveUntil=0;
 /* التاج الذهبي */
 const crownG=new THREE.Group(); scene.add(crownG); crownG.visible=false;
@@ -513,6 +521,7 @@ function targets(){
     case "revealN": return {p:0.6,n:B,e:D,o:D,open:1,pop:1,point:1};
     case "revealP": return {p:B,n:0.6,e:D,o:D,open:1,pop:1,point:1};
     case "revealPN": return {p:B,n:B,e:D,o:D,open:1,pop:1,point:1};
+    case "attract": return {p:B,n:0.4,e:B,o:1,open:1,pop:1,point:1};
     case "electron":return {p:1,n:1,e:B,o:0.6,open:0,pop:0,point:1};
     case "orbit":   return {p:1,n:1,e:1,o:B,open:0,pop:0,point:1};
     default:        return {p:1,n:1,e:1,o:1,open:0,pop:0,point:focus?1:0};
@@ -541,7 +550,7 @@ function targetPoint(out){
   if(focus==="proton"&&protons[featured.p]) return protons[featured.p].getWorldPosition(out);
   if(focus==="neutron"&&neutrons[featured.n]) return neutrons[featured.n].getWorldPosition(out);
   if((focus==="revealN")&&neutrons[featured.n]) return neutrons[featured.n].getWorldPosition(out);
-  if((focus==="revealP"||focus==="revealPN")&&protons[featured.p]) return protons[featured.p].getWorldPosition(out);
+  if((focus==="revealP"||focus==="revealPN"||focus==="attract")&&protons[featured.p]) return protons[featured.p].getWorldPosition(out);
   if(focus==="nucleus") return body.getWorldPosition(out).add(new THREE.Vector3(0,-0.15,ATOM_R*0.6));
   if((focus==="electron"||focus==="orbit")&&electrons[featured.e]) return electrons[featured.e].g.getWorldPosition(out);
   return null;
@@ -617,13 +626,13 @@ function loop(){
     const applyPart=(arr,w,isP)=>arr.forEach((m,i)=>{
       const u=m.userData; m.material.opacity=Math.min(1,w)*W.open; m.material.emissive=m.material.emissive||new THREE.Color(); m.material.emissive.setScalar(Math.max(0,w-1)*0.22);
       const pos=V().copy(u.base);
-      const rv=focus==="revealPN"||(focus==="revealN"&&!isP)||(focus==="revealP"&&isP);
+      const rv=focus==="revealPN"||(focus==="revealN"&&!isP)||((focus==="revealP"||focus==="attract")&&isP);
       const isF=(focus===(isP?"proton":"neutron")||rv)&&i===(isP?featured.p:featured.n)&&countType!==focus;
       const counted=countType===(isP?"proton":"neutron")&&i<countN&&(t-countStart)/1.3>=i;
       const counting=countType===(isP?"proton":"neutron")&&t-countStart<countN*1.3+1.5;
       if(counting&&!counted) m.material.opacity*=0.35;
       if(counted) m.material.emissive.setScalar(0.75);
-      if(isF){ const pt=focus==="revealPN"?popTarget.clone().add(tmp.set(isP?-1.1:0,0,0)):popTarget.clone(); revealPos[isP?0:1].copy(pt); pos.lerp(particles.worldToLocal(pt),W.pop); m.scale.setScalar(1+W.pop*0.7); } else m.scale.setScalar(ease(m.scale.x,counted?1.45:1,0.15));
+      if(isF){ const pt=(focus==="revealPN"||focus==="attract")?popTarget.clone().add(tmp.set(isP?-1.25:0,-0.2,0)):popTarget.clone(); revealPos[isP?0:1].copy(pt); pos.lerp(particles.worldToLocal(pt),W.pop); m.scale.setScalar(1+W.pop*0.7); } else m.scale.setScalar(ease(m.scale.x,counted?1.45:1,0.15));
       m.position.lerp(pos,0.12); u.sym.material.opacity=Math.max(0,Math.min(1,(w-1)*1.8))*W.open;
     });
     applyPart(protons,W.p,true); applyPart(neutrons,W.n,false);
@@ -633,7 +642,8 @@ function loop(){
       r.coreM.opacity=ek*0.9*base; r.glowM.opacity=ek*0.16*base*(focus==="orbit"?2:1);
       r.num.material.opacity=ease(r.num.material.opacity,focus==="orbit"?1:0,0.08); });
     shellSpheres.forEach((m,i)=>{ m.material.opacity=ease(m.material.opacity,focus==="orbit"?0.07+Math.sin(t*2+i)*0.02:0,0.05); });
-    const ePause=W.open>0.3||countType==="electron"||((J.steps[J.i]||{}).id==="ecount");
+    const showMinus=["electrons","ecount","neutral","attract"].includes((J.steps[J.i]||{}).id)||focus==="attract";
+    const ePause=focus==="attract"||W.open>0.3||countType==="electron"||((J.steps[J.i]||{}).id==="ecount");
     eRun=ease(eRun,ePause?0:1,0.06); ePhase+=Math.min(0.05,t-eLastT)*eRun; eLastT=t;
     const eSpeed=1-Math.max(0,W.e-1)*0.5;
     electrons.forEach((x,i)=>{
@@ -643,7 +653,7 @@ function loop(){
       const big=counted?1.7:(((focus==="electron"||focus==="orbit")&&i===featured.e&&countType!=="electron")?1+W.point*0.9:1);
       x.c.material.opacity=Math.min(1,W.e)*show; x.gl.material.opacity=Math.min(1,W.e)*0.85*show;
       const sc=0.6*(1+Math.max(0,W.e-1)*0.6)*big; x.gl.scale.set(sc,sc,1); x.c.scale.setScalar(big);
-      const sa=Math.max(0,Math.min(1,(W.e-1)*1.8)); x.sym.material.opacity=sa*show; x.c.visible=sa<0.5;
+      const sa=showMinus?1:Math.max(0,Math.min(1,(W.e-1)*1.8)); x.sym.material.opacity=ease(x.sym.material.opacity,sa*show,0.1); x.c.visible=true;
       x.trail.forEach((ts,k)=>{ const aa=a-(k+1)*0.075/x.R; ts.position.set(Math.cos(aa)*x.R,Math.sin(aa)*x.R,0); ts.material.opacity=0.55*(1-k/7)*Math.min(1,W.e)*show*eRun; });
     });
     faceShield.visible=W.open<0.06&&atom.visible; { const bp=body.getWorldPosition(V()); faceShield.position.copy(bp).addScaledVector(camDir,2.75); faceShield.lookAt(camera.position); faceShield.scale.setScalar(ATOM_R*0.62*atom.scale.x); }
@@ -679,11 +689,21 @@ function loop(){
   // اللافتة
   drawPill(label,focus?LABELS[focus]:"",64,"rgba(110,231,249,.9)");
   if(hasT) label.sp.position.copy(tp).add(tmp.set(0,0.45,0.25));
-  const isRev=/^reveal/.test(focus||"");
+  const isRev=/^reveal/.test(focus||"")||focus==="attract";
   if(isRev) label.sp.position.copy(revealPos[focus==="revealN"?1:0]).add(tmp.set(0,0.42,0.2));
   label.sp.material.opacity=ease(label.sp.material.opacity,(focus&&(t-focusSince<5||isRev))?1:0,0.08);
   if(focus==="revealPN"){ drawPill(label2,"نيوترون 0 مُتعادل",64,"rgba(110,231,249,.9)"); label2.sp.position.copy(revealPos[1]).add(tmp.set(0,0.42,0.2)); }
-  label2.sp.material.opacity=ease(label2.sp.material.opacity,focus==="revealPN"?1:0,0.08);
+  if(focus==="attract"&&attPick!==focusSince){ attPick=focusSince; let best=0,bx=-1e9; electrons.forEach((x,i)=>{ const p=x.g.getWorldPosition(V()); if(p.x>bx){ bx=p.x; best=i; } }); featured.e=best; }
+  const attOn=focus==="attract"&&electrons[featured.e]&&W.open>0.25;
+  if(focus==="attract"){ if(isRev||true) label.sp.position.copy(revealPos[0]).add(tmp.set(0,0.42,0.2)); }
+  if(attOn){ const ep=electrons[featured.e].g.getWorldPosition(V()), pp=revealPos[0];
+    drawPill(label2,"إلكترون − سالب",64,"rgba(110,231,249,.9)"); label2.sp.position.copy(ep).add(tmp.set(0,0.42,0.2));
+    attLineGeo.attributes.position.setXYZ(0,pp.x,pp.y,pp.z); attLineGeo.attributes.position.setXYZ(1,ep.x,ep.y,ep.z); attLineGeo.attributes.position.needsUpdate=true; attLine.computeLineDistances();
+    const dir=V().subVectors(ep,pp), k=0.5+0.5*Math.sin(t*4), d=dir.clone().normalize();
+    arrows[0].position.copy(pp).addScaledVector(dir,0.22+0.08*k); arrows[0].quaternion.setFromUnitVectors(UP,d);
+    arrows[1].position.copy(ep).addScaledVector(dir,-(0.22+0.08*k)); arrows[1].quaternion.setFromUnitVectors(UP,d.clone().negate()); }
+  attLine.material.opacity=ease(attLine.material.opacity,attOn?0.9:0,0.1); arrowM.opacity=ease(arrowM.opacity,attOn?1:0,0.1);
+  label2.sp.material.opacity=ease(label2.sp.material.opacity,(focus==="revealPN"||attOn)?1:0,0.08);
 
   // نجوم الهالة حول الشخصية، وتاج + اسم عند الثالثة
   const crown=false;
@@ -850,6 +870,7 @@ function stopSpeak(){ if(speechDoneCb){ const cb=speechDoneCb; speechDoneCb=null
 function finishSpeak(){ askLook=false;
   const minsNow=(performance.now()-sessionStartMs)/60000;
   if(speechDoneCb){ const cb=speechDoneCb; speechDoneCb=null; setTimeout(cb,0); }
+  else if(J.pending&&!J.busy){ const p=J.pending; J.pending=null; setTimeout(()=>onStudent(p),200); }
   if(sessionEnded&&celebrating&&!endingAt){ endingAt=clock.getElapsedTime()+4.5; }
   else if(sessionEnded&&!celebrating&&!endingAt){ endingAt=clock.getElapsedTime()+1.5; }
   const mins=(performance.now()-sessionStartMs)/60000;
@@ -1144,7 +1165,7 @@ function buildSteps(){
       ask:()=>"كم نيوترونا عندي؟",
       expectNum:()=>neutrons.length, q:"كم نيوتروناً مضيئاً؟", ans:()=>String(neutrons.length),
       ladder:[()=>"",()=>`عندي ${neutrons.length} نيوترونات!`], recount:true},
-    {id:"charge", focus:"proton", say:()=>"والآن تذكري: ما شحنة البروتونات؟",
+    {id:"charge", focus:"proton", say:()=>"هممم، والآن تذكري: ما شحنة البروتونات؟",
       expect:/موجب|زايد|زائد|\+/, q:"ما شحنة البروتونات؟", ans:"موجبة",
       ladder:[()=>"انظري إلى العلامة على البروتون: زائد. ماذا تعني؟",()=>"هل شحنتها موجبة أم سالبة؟",()=>"شحنة البروتونات موجبة!"]},
     {id:"inside", focus:"nucleus", say:()=>"بعدما عددنا معا، قولي لي: ماذا يوجد داخل النواة؟",
@@ -1158,7 +1179,7 @@ function buildSteps(){
       say2:()=>"ذرة الأكسجين، في الهواء الذي نتنفسه، لها 8 بروتونات! أيهما بروتوناتها أكثر: الكربون أم الأكسجين؟", element:8,
       expect:/[اأ]كسج|اكسيج|ثمان|8/, q:"أي ذرة لها بروتونات أكثر: الكربون (6) أم الأكسجين (8)؟", ans:"الأكسجين",
       ladder:[()=>"الكربون له 6 بروتونات، والأكسجين له 8. أيهما أكثر؟",()=>"الأكسجين له 8 بروتونات، أكثر من الكربون!"]},
-    {id:"electrons", focus:"electron", say:()=>"والآن، لنكتشف من يدور حولي! انظري إلى هذه الحبات التي تدور بسرعة. اسمها الإلكترونات، وشحنتها سالبة. أين تدور الإلكترونات؟",
+    {id:"electrons", focus:"electron", say:()=>"والآن، لنكتشف من يدور حولي! واو، انظري إلى هذه الحبات التي تدور بسرعة. اسمها الإلكترونات، وشحنتها سالبة. أين تدور الإلكترونات؟",
       expect:/حول|خارج|مدار|مستوي|دوائر|برا|بره|تدور/, q:"أين تدور الإلكترونات؟", ans:"حول النواة",
       ok:()=>"صح! تدور حول النواة. قولي معي: الإلكترونات!",
       ladder:[()=>"انظري جيدا، هل تدور داخل قلبي أم حوله؟",()=>"تدور حول قلبي! واسمها الإلكترونات، قولي معي: الإلكترونات!"]},
@@ -1168,9 +1189,9 @@ function buildSteps(){
       expectNum:()=>electrons.length, q:"كم إلكتروناً مضيئاً؟", ans:()=>String(electrons.length),
       ladder:[()=>"قريبة! هيا نعدّها مرة أخرى ببطء.",()=>`عندي ${electrons.length} إلكترونات!`], recount:true},
     {id:"neutral", focus:"electron", caption:"6 (+)  =  6 (−)   ←   مُتعادلة",
-      say:()=>"عندي 6 بروتونات، و6 إلكترونات. العدد نفسه! لذلك أنا ذرة متعادلة.", auto:true},
+      say:()=>"يا سلام! عندي 6 بروتونات، و6 إلكترونات. العدد نفسه! لذلك أنا ذرة متعادلة.", auto:true},
     {id:"levels", focus:"orbit", say:()=>"والدوائر التي تدور فيها الإلكترونات، اسمها مستويات الطاقة. انظري، هذه دوائري!", auto:true},
-    {id:"attract", focus:"electron", say:()=>"النواة موجبة، والإلكترونات سالبة. لماذا لا تهرب إلكتروناتي مني؟ الموجب والسالب: هل يتجاذبان أم يتنافران؟", confirm:()=>"الموجب يجذب السالب، لذلك تبقى إلكتروناتي قريبة مني!",
+    {id:"attract", focus:"attract", caption:"(+)  و  (−)  يتجاذبان", say:()=>"انظري! النواة موجبة، والإلكترونات سالبة. لماذا لا تهرب إلكتروناتي مني؟ الموجب والسالب: هل يتجاذبان أم يتنافران؟", confirm:()=>"الموجب يجذب السالب، لذلك تبقى إلكتروناتي قريبة مني!",
       expect:/تجاذب|يتجاذب|يجذب|جذب|تجذب/, q:"هل الشحنة الموجبة والسالبة يتجاذبان أم يتنافران؟", ans:"يتجاذبان",
       ladder:[()=>"فكري: لو كانا يتنافران، لهربت إلكتروناتي بعيدا! فهل يتجاذبان أم يتنافران؟",()=>"يتجاذبان! الموجب يجذب السالب، لذلك تبقى إلكتروناتي قريبة مني."], last:true},
     {id:"facts", focus:"nucleus", say:()=>"تعرفين شيئا عجيبا؟ لو كبرت بحجم ملعب كرة، لكانت نواتي بحجم حبة حمص في وسطه! يعني نواتي في الحقيقة أصغر بكثير، لكني كبرتها لكِ. وأغلب وزني في قلبي الصغير، أما الإلكترونات، فخفيفة جدا!", auto:true},
@@ -1266,8 +1287,9 @@ async function onStudent(text){
     if(SOCIAL.test(norm(text))&&!J.waitRepeat){ const a=await shortAnswer(text); await speakNow(a); if(!st.closing&&!st.any) await speakNow("سؤالي كان: "+(st.ask?st.ask():st.say().split(/[.!]\s/).pop())); else if(st.closing) await speakNow("هل لديكِ سؤال آخر، أم أودّعكِ؟"); return; }
     if(st.closing){
       const n=norm(text), W2=n.split(" ");
-      const BYE=/(^| )(لا|لاء|خلاص|يكفي|انتهيت|ودعيني|اودعك|وداعا|باي|سلام|السلامه)( |$)|الى اللقاء|مع السلامه|لا شكرا/;
+      const BYE=/(^| )(لا|لاء|خلاص|يكفي|بس|كفايه|انتهيت|ودعيني|اودعك|وداعا|باي|سلام|السلامه|شكرا)( |$)|الى اللقاء|مع السلامه|لا شكرا/;
       if(BYE.test(n)&&W2.length<=5&&!/[؟?]/.test(text)){ await nextStep(); return; }
+      if(/^(نعم|ايوه|ايوا|اي|اوكي|طيب)?\s*(عندي|لدي)?\s*(سؤال|سوال)(ي)?\s*(هو)?$/.test(n)||/^(نعم|ايوه|ايوا|اي|عندي|لدي)$/.test(n)){ await speakNow("تفضلي، ما سؤالكِ؟"); return; }
       const v=await judge({q:"هل لديك سؤال أم أودعك؟",ans:"سؤال أو وداع"},text);
       if(v==="unclear"){ await speakNow("لم أسمعكِ جيدا يا جميلتي، هل تعيدين؟"); return; }
       if(v==="end"){ await nextStep(); return; }
@@ -1341,10 +1363,12 @@ async function startRealtimeSTT(stream){
     dc.onmessage=e=>{ let ev; try{ ev=JSON.parse(e.data); }catch(_){ return; }
       if(ev.type==="input_audio_buffer.speech_started"){ lastHeardMs=performance.now(); silenceStage=0; if(mode==="idle") mode="hearing"; }
       else if(ev.type==="conversation.item.input_audio_transcription.delta"){ lastHeardMs=performance.now(); }
+      else if(ev.type==="input_audio_buffer.speech_stopped"){ lastHeardMs=performance.now(); }
       else if(ev.type==="conversation.item.input_audio_transcription.completed"){
         const txt=(ev.transcript||"").trim(); log("stt(realtime): "+txt);
         if(mode==="hearing") mode="idle";
-        if(txt&&mode!=="speaking"){ heardBuf=txt; flushHeard(); } }
+        if(txt&&mode!=="speaking"){ heardBuf=txt; flushHeard(); }
+        else if(txt){ J.pending=txt; log("queued (speaking): "+txt); } }
       else if(ev.type==="error"){ log("rt error: "+JSON.stringify(ev.error||ev).slice(0,160)); } };
     pc.onconnectionstatechange=()=>{ log("rt: "+pc.connectionState); if(["failed","closed","disconnected"].includes(pc.connectionState)) stopRealtimeSTT(true); };
     const offer=await pc.createOffer(); await pc.setLocalDescription(offer);
@@ -1405,6 +1429,10 @@ setInterval(()=>{
   if(!started||!active) return;
   if(mode==="idle"){ if(!idleSince) idleSince=performance.now(); } else idleSince=0;
   if(paused && mode==="idle" && !curAudio && idleSince && performance.now()-idleSince>4000){ log("watchdog: unpause"); paused=false; }
+  if(OPENAI){
+    if(mode==="hearing"&&performance.now()-lastHeardMs>5000){ log("watchdog: hearing timeout"); mode="idle"; }
+    if(oaiListening&&!RT.pc&&!RT.on&&micMon&&RT.tries<8){ RT.tries++; log("watchdog: reconnect realtime"); startRealtimeSTT(micMon.stream); }
+    return; }
   if(canAzureSTT()){ if(!az){ log("watchdog: restart azure stt"); startAzureSTT(); } return; }
   if(!paused && !rec && mode!=="speaking" && mode!=="thinking"){ log("watchdog: restart listening"); startListening(); }
 },3000);
