@@ -462,7 +462,7 @@ const arrowM=new THREE.MeshBasicMaterial({color:0xffe08a,transparent:true,opacit
 const arrows=[new THREE.Mesh(new THREE.ConeGeometry(0.07,0.2,16),arrowM),new THREE.Mesh(new THREE.ConeGeometry(0.07,0.2,16),arrowM)];
 arrows.forEach(a=>{ a.renderOrder=11; attG.add(a); });
 const UP=new THREE.Vector3(0,1,0); let attPick=-1;
-const LABELS={root:"الجذور",stem:"الساق",leaf:"الأوراق",flower:"الزهرة",seed:"البذور",nucleus:"النَّواة",proton:"بروتون",neutron:"نيوترون",attract:"",revealN:"نيوترون",revealP:"بروتون",revealPN:"بروتون",electron:"إلكترون",orbit:"مستويات الطاقة"};
+const LABELS={root:"الجذور",stem:"الساق",leaf:"الأوراق",flower:"الزهرة",seed:"البذور",nucleus:"النَّواة",proton:"بروتون",neutron:"نيوترون",attract:"",neutralShow:"",revealN:"نيوترون",revealP:"بروتون",revealPN:"بروتون",electron:"إلكترون",orbit:"مستويات الطاقة"};
 let studentName="", surpriseAt=-10, goneFade=0, waveUntil=0;
 /* التاج الذهبي */
 const crownG=new THREE.Group(); scene.add(crownG); crownG.visible=false;
@@ -524,6 +524,7 @@ function targets(){
     case "revealP": return {p:B,n:0.6,e:D,o:D,open:1,pop:1,point:1};
     case "revealPN": return {p:B,n:B,e:D,o:D,open:1,pop:1,point:1};
     case "attract": return {p:B,n:0.4,e:B,o:1,open:1,pop:1,point:1};
+    case "neutralShow": return {p:B,n:0.25,e:B,o:1,open:1,pop:0,point:0};
     case "electron":return {p:1,n:1,e:B,o:0.6,open:0,pop:0,point:1};
     case "orbit":   return {p:1,n:1,e:1,o:B,open:0,pop:0,point:1};
     default:        return {p:1,n:1,e:1,o:1,open:0,pop:0,point:focus?1:0};
@@ -1205,13 +1206,13 @@ function buildSteps(){
       ask:()=>"كم إلكترونا عندي؟",
       expectNum:()=>electrons.length, q:"كم إلكتروناً مضيئاً؟", ans:()=>String(electrons.length),
       ladder:[()=>"قريبة! هيا نعدّها مرة أخرى ببطء.",()=>`عندي ${electrons.length} إلكترونات!`], recount:true},
-    {id:"neutral", focus:"electron", caption:"مُتعادلة",
+    {id:"neutral", focus:"neutralShow", caption:"مُتعادلة",
       say:()=>"يا سلام! عندي 6 بروتونات، و6 إلكترونات. العدد نفسه! لذلك أنا ذرة متعادلة.", auto:true},
     {id:"levels", focus:"orbit", say:()=>"والدوائر التي تدور فيها الإلكترونات، اسمها مستويات الطاقة. انظري، هذه دوائري!", auto:true},
     {id:"attract", focus:"attract", caption:"تجاذب", say:()=>"انظري! النواة موجبة، والإلكترونات سالبة. لماذا لا تهرب إلكتروناتي مني؟ الموجب والسالب: هل بينهما تجاذب أم تنافر؟", confirm:()=>"بينهما تجاذب! الموجب يجذب السالب، لذلك تبقى إلكتروناتي قريبة مني!",
       expect:/تجاذب|يتجاذب|يجذب|جذب|تجذب/, q:"هل بين الشحنة الموجبة والسالبة تجاذب أم تنافر؟", ans:"تجاذب",
       ladder:[()=>"فكري: لو كان بينهما تنافر، لهربت إلكتروناتي بعيدا! فهل بينهما تجاذب أم تنافر؟",()=>"بينهما تجاذب! الموجب يجذب السالب، لذلك تبقى إلكتروناتي قريبة مني."], last:true},
-    {id:"facts", focus:"nucleus", say:()=>"تعرفين شيئا عجيبا؟ لو كبرت بحجم ملعب كرة، لكانت نواتي بحجم حبة حمص في وسطه! يعني نواتي في الحقيقة أصغر بكثير، لكني كبرتها لكِ. وأغلب وزني في قلبي الصغير، أما الإلكترونات، فخفيفة جدا!", auto:true},
+    {id:"facts", focus:"nucleus", say:()=>"تعرفين شيئا عجيبا؟ لو كبرت حتى أصير بحجم ملعب كرة، لكانت نواتي في وسطه بحجم حبة حمص فقط! يعني نواتي في الحقيقة أصغر بكثير مما ترينها، لكني كبرتها لكِ. والأعجب: هذه الحبة الصغيرة هي أثقل جزء فيّ! فرغم صغر نواتي، فيها تقريبا كل وزني، أما الإلكترونات حولها، فخفيفة جدا جدا!", auto:true},
     {id:"surprise", say:()=>`واو! مفاجأة! أنتِ الآن عالمة الذرة الصغيرة! هيا نثبت ذلك بأربعة أسئلة! السؤال الأول: من أنا؟ ما أصغر جزء في المادة؟`, surprise:true,
       expect:/ذر/, q:"من أنا؟ ما أصغر جزء في المادة؟", ans:"الذرة", soft:()=>"لا بأس، تذكري: أنا الذرة، أصغر جزء في المادة! قولي معي: الذرة!"},
     {id:"recap1", focus:"nucleus", say:()=>"السؤال الثاني: ما اسم الشيء الذي في وسطي؟",
