@@ -1149,9 +1149,10 @@ async function nextStep(prefix){
 }
 // تقييم الإجابة: محلياً أولاً، ثم Claude عند الحاجة
 async function claudeCall(body){
-  if(apiKey){ const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"content-type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify(body)}); return r.json(); }
-  let r=await fetch("/.netlify/functions/claude",{method:"POST",headers:srvHeaders(),body:JSON.stringify(body)});
-  if(await needsAccess(r)&&await askAccess()) r=await fetch("/.netlify/functions/claude",{method:"POST",headers:srvHeaders(),body:JSON.stringify(body)});
+  if(apiKey&&!OPENAI){ const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"content-type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify(body)}); return r.json(); }
+  const ep=OPENAI?"/.netlify/functions/brain":"/.netlify/functions/claude";
+  let r=await fetch(ep,{method:"POST",headers:srvHeaders(),body:JSON.stringify(body)});
+  if(await needsAccess(r)&&await askAccess()) r=await fetch(ep,{method:"POST",headers:srvHeaders(),body:JSON.stringify(body)});
   return r.json();
 }
 async function judge(st,text){
@@ -1247,8 +1248,39 @@ function journeySilence(stage){
 // تنبيه عند صمت الطالبة
 let silenceStage=0, lastHeardMs=0, lastVoiceMs=0, micMon=null;
 let oaiListening=false;
+const RT={pc:null,dc:null,track:null,on:false,tries:0,startedAt:0};
+async function startRealtimeSTT(stream){
+  if(RT.pc) return;
+  try{
+    const tr=await fetch("/.netlify/functions/rt-token",{method:"POST",headers:srvHeaders()}); const tk=await tr.json().catch(()=>({}));
+    const key=tk.value||(tk.client_secret&&tk.client_secret.value);
+    if(!key){ log("rt token failed: "+tr.status+" "+JSON.stringify(tk).slice(0,160)); RT.on=false; return; }
+    const pc=new RTCPeerConnection(); RT.pc=pc;
+    RT.track=stream.getAudioTracks()[0].clone(); pc.addTrack(RT.track);
+    const dc=pc.createDataChannel("oai-events"); RT.dc=dc;
+    dc.onmessage=e=>{ let ev; try{ ev=JSON.parse(e.data); }catch(_){ return; }
+      if(ev.type==="input_audio_buffer.speech_started"){ lastHeardMs=performance.now(); silenceStage=0; if(mode==="idle") mode="hearing"; }
+      else if(ev.type==="conversation.item.input_audio_transcription.delta"){ lastHeardMs=performance.now(); }
+      else if(ev.type==="conversation.item.input_audio_transcription.completed"){
+        const txt=(ev.transcript||"").trim(); log("stt(realtime): "+txt);
+        if(mode==="hearing") mode="idle";
+        if(txt&&mode!=="speaking"){ heardBuf=txt; flushHeard(); } }
+      else if(ev.type==="error"){ log("rt error: "+JSON.stringify(ev.error||ev).slice(0,160)); } };
+    pc.onconnectionstatechange=()=>{ log("rt: "+pc.connectionState); if(["failed","closed","disconnected"].includes(pc.connectionState)) stopRealtimeSTT(true); };
+    const offer=await pc.createOffer(); await pc.setLocalDescription(offer);
+    const ans=await fetch("https://api.openai.com/v1/realtime/calls",{method:"POST",body:offer.sdp,headers:{"Authorization":"Bearer "+key,"Content-Type":"application/sdp"}});
+    if(!ans.ok){ log("rt connect failed: "+ans.status+" "+(await ans.text()).slice(0,160)); stopRealtimeSTT(false); RT.on=false; return; }
+    await pc.setRemoteDescription({type:"answer",sdp:await ans.text()});
+    RT.on=true; RT.startedAt=performance.now(); log("listen: openai realtime");
+  }catch(e){ log("rt failed: "+e.message); stopRealtimeSTT(false); RT.on=false; }
+}
+function stopRealtimeSTT(retry){ try{ RT.dc&&RT.dc.close(); }catch(e){} try{ RT.pc&&RT.pc.close(); }catch(e){} try{ RT.track&&RT.track.stop(); }catch(e){}
+  RT.pc=null; RT.dc=null; RT.track=null; const was=RT.on; RT.on=false;
+  if(retry&&was&&active&&RT.tries<5&&micMon){ RT.tries++; setTimeout(()=>startRealtimeSTT(micMon.stream),1500); } }
 const vad={rec:null,chunks:[],on:false,start:0,loud:0};
 function vadTick(stream,rms){
+  if(RT.track){ RT.track.enabled=!(mode==="speaking"||mode==="thinking"||J.busy||performance.now()-speakEnd<400); }
+  if(RT.on||RT.pc) return;
   if(!OPENAI||!active||sessionEnded) return;
   const now=performance.now();
   const canHear=mode!=="speaking"&&mode!=="thinking"&&!J.busy&&now-speakEnd>500;
@@ -1278,7 +1310,7 @@ async function startMicMonitor(){
     const buf=new Uint8Array(an.fftSize); micMon={an,buf,stream};
     setInterval(()=>{ an.getByteTimeDomainData(buf); let s2=0; for(let i=0;i<buf.length;i++){ const v=(buf[i]-128)/128; s2+=v*v; }
       const rms=Math.sqrt(s2/buf.length); if(rms>0.04&&mode!=="speaking") lastVoiceMs=performance.now(); vadTick(stream,rms); },100);
-    log("mic monitor: on"); }catch(e){ log("mic monitor failed: "+e.message); }
+    log("mic monitor: on"); if(OPENAI) startRealtimeSTT(stream); }catch(e){ log("mic monitor failed: "+e.message); }
 }
 setInterval(()=>{
   if(!started||sessionEnded||mode!=="idle"||J.busy) return;
