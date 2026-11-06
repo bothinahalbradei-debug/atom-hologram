@@ -1212,9 +1212,11 @@ function buildSteps(){
       expect:/تجاذب|يتجاذب|يجذب|جذب|تجذب/, q:"هل بين الشحنة الموجبة والسالبة تجاذب أم تنافر؟", ans:"تجاذب",
       ladder:[()=>"فكري: لو كان بينهما تنافر، لهربت إلكتروناتي بعيدا! فهل بينهما تجاذب أم تنافر؟",()=>"بينهما تجاذب! الموجب يجذب السالب، لذلك تبقى إلكتروناتي قريبة مني."], last:true},
     {id:"facts", focus:"nucleus", say:()=>"تعرفين شيئا عجيبا؟ لو كبرت بحجم ملعب كرة، لكانت نواتي بحجم حبة حمص في وسطه! يعني نواتي في الحقيقة أصغر بكثير، لكني كبرتها لكِ. وأغلب وزني في قلبي الصغير، أما الإلكترونات، فخفيفة جدا!", auto:true},
-    {id:"surprise", say:()=>`واو! مفاجأة! أنتِ الآن عالمة الذرة الصغيرة! هيا نثبت ذلك بثلاثة أسئلة! السؤال الأول: ما اسم الشيء الذي في وسطي؟`, surprise:true,
+    {id:"surprise", say:()=>`واو! مفاجأة! أنتِ الآن عالمة الذرة الصغيرة! هيا نثبت ذلك بأربعة أسئلة! السؤال الأول: من أنا؟ ما أصغر جزء في المادة؟`, surprise:true,
+      expect:/ذر/, q:"من أنا؟ ما أصغر جزء في المادة؟", ans:"الذرة", soft:()=>"لا بأس، تذكري: أنا الذرة، أصغر جزء في المادة! قولي معي: الذرة!"},
+    {id:"recap1", focus:"nucleus", say:()=>"السؤال الثاني: ما اسم الشيء الذي في وسطي؟",
       expect:/نوا|نوى/, q:"ما اسم قلب الذرة؟", ans:"النواة", soft:()=>"لا بأس، تذكري: اسم قلبي النواة! قولي معي: النواة!"},
-    {id:"recap3", focus:"revealPN", say:()=>"السؤال الثاني: ما الحبات التي داخل نواتي؟", expectBoth:[/ب?رو?تون|بلوتون|بروتو|بورتون/,/نيو?ترون|نترون|نوترون|نيوتر|نيترون/], expect:/(ب?رو?تون|بروتو).*(نيو?ترون|نترون|نوترون|نيوتر)|(نيو?ترون|نترون|نوترون|نيوتر).*(ب?رو?تون|بروتو)/, q:"ما الذي يوجد داخل نواة الذرة؟", ans:"البروتونات والنيوترونات", soft:()=>"لا بأس، تذكري: داخل نواتي البروتونات والنيوترونات! قولي معي: بروتونات ونيوترونات!"},
+    {id:"recap3", focus:"revealPN", say:()=>"السؤال الثالث: ما الحبات التي داخل نواتي؟", expectBoth:[/ب?رو?تون|بلوتون|بروتو|بورتون/,/نيو?ترون|نترون|نوترون|نيوتر|نيترون/], expect:/(ب?رو?تون|بروتو).*(نيو?ترون|نترون|نوترون|نيوتر)|(نيو?ترون|نترون|نوترون|نيوتر).*(ب?رو?تون|بروتو)/, q:"ما الذي يوجد داخل نواة الذرة؟", ans:"البروتونات والنيوترونات", soft:()=>"لا بأس، تذكري: داخل نواتي البروتونات والنيوترونات! قولي معي: بروتونات ونيوترونات!"},
     {id:"recap2", focus:"electron", say:()=>"والسؤال الأخير: ما الحبات التي تدور حولي؟", expect:/كترون|لكترو|سترون|ليكترون|اكترون/, q:"من يدور حول نواة الذرة؟", ans:"الإلكترونات", soft:()=>"لا بأس، تذكري: تدور حولي الإلكترونات! قولي معي: الإلكترونات!"},
     {id:"closing", say:()=>"أنتِ عالمة حقيقية! هل لديكِ سؤال عني، أم نقول مع السلامة؟", closing:true},
     {id:"bye", say:()=>`مع السلامة يا عالمة الذرة! أنا الذرة، وسأبقى معكِ في كل شيء حولكِ. نلتقي مجددا!`, bye:true}
@@ -1242,7 +1244,9 @@ async function runStep(){
   if(st.auto){ await new Promise(z=>setTimeout(z,1000)); await nextStep(); }
 }
 async function nextStep(prefix){
-  J.i++; const st=J.steps[J.i];
+  J.i++;
+  { const si=J.steps.findIndex(x=>x.surprise); if(si>0&&J.i<si&&(performance.now()-sessionStartMs)/60000>10){ log("time: 10 minutes, going to the surprise"); J.i=si; } }
+  const st=J.steps[J.i];
   if(st&&st.last===undefined&&J.steps[J.i-1]&&J.steps[J.i-1].last) J.missionsDoneAt=performance.now();
   // بعد 5 دقائق والمهمات منتهية: مباشرة إلى المفاجأة
   if(prefix){ await speakNow(prefix); }
@@ -1259,6 +1263,7 @@ async function claudeCall(body){
 async function judge(st,text){
   const n=norm(text);
   if(DONTKNOW.test(n)) return "dontknow";
+  if(n.replace(/\s/g,"").length<=2&&!/\d/.test(n)) return "unclear";
   if(st.expectNum){ const k=numIn(text); if(k!=null) return k===st.expectNum()?"correct":"wrong"; }
   if(st.expect&&st.expect.test(n)) return "correct";
   if(st.expectBoth){ st.expectBoth.forEach((r,i)=>{ if(r.test(n)) J.got.add(i); }); if(J.got.size>=st.expectBoth.length) return "correct"; if(J.got.size>0) return "partial"; }
@@ -1331,9 +1336,9 @@ async function onStudent(text){
     }
     const CONF=/^(ايش|ايه|وش|شو|ماذا|ها|هاه|عيدي|اعيدي|ما فهمت|مافهمت|كيف|نعم|ايش تقولين|وش تقولين)$/;
     if((CONF.test(norm(text))||CONFUSED.test(norm(text)))&&!st.closing){ await speakNow("سؤالي هو: "+(st.ask?st.ask():st.say().split(/[.!]\s/).pop())); return; }
-    if((st.id==="heart"||st.surprise)&&(TERM_RE.بروت.test(norm(text))||TERM_RE.نيوت.test(norm(text)))){ happyUntil=clock.getElapsedTime()+2; await speakNow("صحيح! في وسطي بروتونات ونيوترونات! وكلها معا اسمها النواة! قولي معي: النواة!"); J.waitRepeat=true; return; }
+    if((st.id==="heart"||st.id==="recap1")&&(TERM_RE.بروت.test(norm(text))||TERM_RE.نيوت.test(norm(text)))){ happyUntil=clock.getElapsedTime()+2; await speakNow("صحيح! في وسطي بروتونات ونيوترونات! وكلها معا اسمها النواة! قولي معي: النواة!"); J.waitRepeat=true; return; }
     const v=await judge(st,text);
-    if(st.surprise||st.id==="recap2"||st.id==="recap3"){ if(v==="correct"){ happyUntil=clock.getElapsedTime()+2.5; await nextStep(pick(PRAISE_W)); } else { encourageUntil=clock.getElapsedTime()+3; await speakNow(st.soft()); J.waitRepeat=true; } return; }
+    if(st.surprise||st.id==="recap1"||st.id==="recap2"||st.id==="recap3"){ if(v==="correct"){ happyUntil=clock.getElapsedTime()+2.5; await nextStep(pick(PRAISE_W)); } else { encourageUntil=clock.getElapsedTime()+3; await speakNow(st.soft()); J.waitRepeat=true; } return; }
     if(v==="correct"){
       happyUntil=clock.getElapsedTime()+2.5;
       if(st.ok){ await speakNow(st.ok()); J.waitRepeat=true; return; }
@@ -1378,9 +1383,9 @@ async function doCount(st){
 }
 let nextGreetAddr=pick(ADDR);
 function greetText(){ return `مرحبا ${nextGreetAddr}! أنا الذرة. تعرفين؟ أنا صغيرة جدا جدا، لا تراني عينكِ أبدا. لكني اليوم كبرت من أجلكِ، حتى تريني وتتعرفي علي! وعندي سر عجيب، عنكِ أنتِ! تريدين أن تعرفيه؟`; }
-function prepareGreeting(){ if(useEleven()) speechParts(greetText()).forEach(prefetch); }
+function prepareGreeting(){ if(useEleven()) prefetch(greetText()); }
 setTimeout(prepareGreeting,1500);
-function journeyStart(){ startMicMonitor(); J.steps=buildSteps(); J.steps.forEach(st=>{ const f=st.say; const t=f(); st.say=()=>t; }); J.i=0; J.tries=0; J.qCount=0; J.waitRepeat=false; J.busy=false; runStep(); }
+function journeyStart(){ startMicMonitor(); ["أحسنتِ!","رائع!","ممتاز!","برافو عليكِ!","يا سلام!","واو، إجابة ذكية!","خذي وقتكِ، أنا أنتظركِ!","لا بأس! سأساعدكِ."].forEach(prefetch); J.steps=buildSteps(); J.steps.forEach(st=>{ const f=st.say; const t=f(); st.say=()=>t; }); J.i=0; J.tries=0; J.qCount=0; J.waitRepeat=false; J.busy=false; runStep(); }
 // الصمت: بعد 5 ثوان طمأنة، وبعد 15 ثانية تلميح (كأنها قالت لا أعرف)
 function journeySilence(stage){
   const st=J.steps[J.i]; if(!st||st.any||st.bye||J.busy) return;
@@ -1424,7 +1429,7 @@ function stopRealtimeSTT(retry){ try{ RT.dc&&RT.dc.close(); }catch(e){} try{ RT.
   if(retry&&was&&active&&RT.tries<5&&micMon){ RT.tries++; setTimeout(()=>startRealtimeSTT(micMon.stream),1500); } }
 const vad={rec:null,chunks:[],on:false,start:0,loud:0};
 function vadTick(stream,rms){
-  if(RT.track){ RT.track.enabled=!(mode==="speaking"||mode==="thinking"||J.busy||performance.now()-speakEnd<400); }
+  if(RT.track){ RT.track.enabled=!(mode==="speaking"||mode==="thinking"||J.busy||performance.now()-speakEnd<200); }
   if(RT.on||RT.pc) return;
   if(!OPENAI||!active||sessionEnded) return;
   const now=performance.now();
