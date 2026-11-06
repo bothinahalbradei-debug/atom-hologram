@@ -1210,7 +1210,7 @@ let speechDoneCb=null;
 function setFocusNow(p){ pendingFocus=p; focusSince=-10; }
 async function runStep(){
   const st=J.steps[J.i]; if(!st) return;
-  hideCaption(); J.tries=0; J.waitRepeat=false; J.got=new Set(); J.partials=0; J.pending=null; countType=null; pendingCount=null;
+  hideCaption(); J.turns=0; J.unclear=0; J.tries=0; J.waitRepeat=false; J.got=new Set(); J.partials=0; J.pending=null; countType=null; pendingCount=null;
   if(st.focus) setFocusNow(st.focus); else if(!st.surprise) setFocusNow(null);
   if(Z!==DEFAULT_Z&&!st.element) buildElement(DEFAULT_Z);
   if(st.surprise){ celebrating=true; surpriseAt=clock.getElapsedTime()+0.4; happyUntil=clock.getElapsedTime()+5; }
@@ -1248,7 +1248,7 @@ async function judge(st,text){
   if(DONTKNOW.test(n)) return "dontknow";
   if(!apiKey&&!SERVER) return "wrong";
   try{
-    const d=await claudeCall({model:MODEL,max_tokens:120,thinking:thinkingOffOK?{type:"disabled"}:undefined,system:"أنت مقيّم إجابات لطالبة صغيرة تتحدث مع مجسّم ذرة. أعد JSON فقط بلا أي نص آخر، بالشكل: {\"v\":\"correct|wrong|dontknow|question|unclear|end\"}. correct إذا كان المعنى صحيحاً ولو بكلمات مختلفة. question إذا كانت تسأل سؤالاً. unclear إذا كان الكلام غير مفهوم أو لا علاقة له. end إذا طلبت إنهاء المحادثة بوضوح. وإذا كان كلاماً ودياً (مثل أحبك أو شكراً) فاعتبريه question.",
+    const d=await claudeCall({model:MODEL,max_tokens:120,thinking:thinkingOffOK?{type:"disabled"}:undefined,system:"أنت مقيّم إجابات لطالبة صغيرة تتحدث مع مجسّم ذرة. أعد JSON فقط بلا أي نص آخر، بالشكل: {\"v\":\"correct|wrong|dontknow|question|unclear|end\"}. correct إذا كان المعنى صحيحاً ولو بكلمات مختلفة. question إذا كانت تسأل سؤالاً. unclear فقط إذا كان الكلام مشوشاً لا يُفهم أبداً. أما الإجابة القصيرة المفهومة الخاطئة (مثل كلمة واحدة لا تطابق) فهي wrong وليست unclear. end إذا طلبت إنهاء المحادثة بوضوح. وإذا كان كلاماً ودياً (مثل أحبك أو شكراً) فاعتبريه question.",
         messages:[{role:"user",content:`السؤال: ${st.q}\nالإجابة الصحيحة: ${typeof st.ans==="function"?st.ans():st.ans}\nكلام الطالبة: ${text}`}]}); const t=(d.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("");
     const m=t.match(/"v"\s*:\s*"(\w+)"/); log("judge: "+(m?m[1]:"?")); return m?m[1]:"unclear";
   }catch(e){ log("judge failed: "+e.message); return "unclear"; }
@@ -1273,6 +1273,11 @@ async function onStudent(text){
   if(similarToOwn(text)&&!(st.expect&&st.expect.test(norm(text)))&&!J.waitRepeat&&!st.repeatOnly&&!/قولي معي/.test(lastSpokenText)){ log("ignored echo: "+text); return; }
   J.busy=true; mode="thinking"; log("student: "+text); hideCaption();
   try{
+    J.turns=(J.turns||0)+1;
+    if(J.turns>4&&!st.closing&&!st.bye&&!J.waitRepeat){
+      const L=st.ladder||[]; const fin=L.length?L[L.length-1]():"";
+      log("safety: moving on after "+J.turns+" turns");
+      await nextStep(fin&&!/قولي معي/.test(fin)?("لا بأس! "+fin):"لا بأس، هيا نكمل رحلتنا!"); return; }
     if(st.any){ await nextStep(); return; }
     if(st.around){
       const n=norm(text);
@@ -1293,7 +1298,7 @@ async function onStudent(text){
       if(BYE.test(n)&&W2.length<=5&&!/[؟?]/.test(text)){ await nextStep(); return; }
       if(/^(نعم|ايوه|ايوا|اي|اوكي|طيب)?\s*(عندي|لدي)?\s*(سؤال|سوال)(ي)?\s*(هو)?$/.test(n)||/^(نعم|ايوه|ايوا|اي|عندي|لدي)$/.test(n)){ await speakNow("تفضلي، ما سؤالكِ؟"); return; }
       const v=await judge({q:"هل لديك سؤال أم أودعك؟",ans:"سؤال أو وداع"},text);
-      if(v==="unclear"){ await speakNow("لم أسمعكِ جيدا يا جميلتي، هل تعيدين؟"); return; }
+      if(v==="unclear"&&(J.unclear=(J.unclear||0)+1)<2){ await speakNow("لم أسمعكِ جيدا يا جميلتي، هل تعيدين؟"); return; }
       if(v==="end"){ await nextStep(); return; }
       const a=await shortAnswer(text); await speakNow(a+" هل لديكِ سؤال آخر، أم أودّعكِ؟"); return;
     }
@@ -1313,13 +1318,14 @@ async function onStudent(text){
     if(v==="unclear"){ await speakNow(`لم أسمعكِ جيدا ${pick(ADDR)}. سؤالي هو: `+(st.ask?st.ask():st.say().split(/[.!]\s/).pop())); return; }
     if(v==="question"){ const a=await shortAnswer(text); await speakNow(a); await speakNow("سؤالي كان: "+(st.ask?st.ask():st.say().split(/[.!]\s/).pop())); return; }
     if(v==="end"){ J.i=J.steps.findIndex(x=>x.surprise)-1; await nextStep(); return; }
+    const vv=(v==="unclear"||v==="question"||v==="end")?"dontknow":v;
     // خطأ أو لا أعرف: تدرّج في المساعدة
     encourageUntil=clock.getElapsedTime()+3;
     const L=st.ladder||[]; const k=J.tries++;
     if(k<L.length){ let line=L[k]();
       const OPEN=/^(قريبة[^!]*!|فكرة جميلة[^!.]*[!.]|تخمين جميل!|تذكري:?)\s*/;
       if(st.count&&k===0){ const num=numIn(text), exp=st.expectNum(); line=(num!=null&&Math.abs(num-exp)<=1)?"قريبة جدا! هيا نعدّها مرة أخرى ببطء.":"لا بأس، هيا نعدّها معا مرة أخرى ببطء."; }
-      else if(L.length>1){ const base=line.replace(OPEN,""); line=k===0?(v==="dontknow"?"لا بأس! سأساعدكِ. ":"فكرة جميلة، لكنها ليست هي. ")+base:base; }
+      else if(L.length>1){ const base=line.replace(OPEN,""); line=k===0?(vv==="dontknow"?"لا بأس! سأساعدكِ. ":"فكرة جميلة، لكنها ليست هي. ")+base:base; }
       if(st.reveal&&k===0) setFocusNow("revealPN"); const ch=line.match(/هل (.+?) أم (.+?)[؟?]/); if(ch) showCaption(ch[1].replace(/^(اسم قلبي|داخل النواة|شحنتها|النواة|هي|تدور)\s*/,"").replace(/[،,]\s*$/,"")+"    |    "+ch[2],20000); await speakNow(line);
       if(/قولي معي/.test(line)){ J.waitRepeat=true; return; }
       if(st.recount&&k===0){ await doCount(st); return; }
